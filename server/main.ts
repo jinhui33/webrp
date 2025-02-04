@@ -3,5 +3,8 @@ import app from "./app.ts"
 
 export default serve({
     type: "module",
-    fetch: app.fetch,
+    fetch: (req, ctx) => {
+        console.log(ctx)
+        return app.fetch(req, ctx)
+    },
 })
