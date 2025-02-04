@@ -1,7 +1,7 @@
 {
   "version": "4",
   "specifiers": {
-    "jsr:@ayonli/jsext@^1.4.3": "1.4.3",
+    "jsr:@ayonli/jsext@^1.4.4": "1.4.4",
     "jsr:@std/assert@1": "1.0.11",
     "jsr:@std/internal@^1.0.5": "1.0.5",
     "npm:dotenv@^16.4.7": "16.4.7",
@@ -12,8 +12,8 @@
     "npm:zod@^3.23.8": "3.24.1"
   },
   "jsr": {
-    "@ayonli/jsext@1.4.3": {
-      "integrity": "28d9782dd48c0ce70da5049de91c66e217ac21b746b35198f70b306eef8a65a9",
+    "@ayonli/jsext@1.4.4": {
+      "integrity": "5b23dead95762bdced65bc741cc1690cff5a78adf42e0a5c1e6203cb89b8f4ac",
       "dependencies": [
         "npm:iconv-lite",
         "npm:sudo-prompt",
@@ -59,7 +59,7 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@ayonli/jsext@^1.4.3",
+      "jsr:@ayonli/jsext@^1.4.4",
       "jsr:@std/assert@1",
       "npm:dotenv@^16.4.7",
       "npm:hono@^4.6.20"
