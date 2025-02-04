@@ -28,6 +28,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
 
     // An endpoint is for the agent to connect to the server using WebSocket.
     .get("/ws", ctx => {
+        console.log(ctx.env)
         const { searchParams } = new URL(ctx.req.url)
         const agentId = searchParams.get("agentId")
         if (!agentId) {

@@ -3,5 +3,5 @@ import app from "./app.ts"
 
 export default serve({
     type: "module",
-    fetch: app.fetch.bind(app),
+    fetch: app.fetch,
 })
