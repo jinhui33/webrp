@@ -1,0 +1,68 @@
+{
+  "version": "4",
+  "specifiers": {
+    "jsr:@ayonli/jsext@^1.4.3": "1.4.3",
+    "jsr:@std/assert@1": "1.0.11",
+    "jsr:@std/internal@^1.0.5": "1.0.5",
+    "npm:dotenv@^16.4.7": "16.4.7",
+    "npm:hono@^4.6.20": "4.6.20",
+    "npm:iconv-lite@~0.6.3": "0.6.3",
+    "npm:sudo-prompt@^9.2.1": "9.2.1",
+    "npm:ws@^8.18.0": "8.18.0",
+    "npm:zod@^3.23.8": "3.24.1"
+  },
+  "jsr": {
+    "@ayonli/jsext@1.4.3": {
+      "integrity": "28d9782dd48c0ce70da5049de91c66e217ac21b746b35198f70b306eef8a65a9",
+      "dependencies": [
+        "npm:iconv-lite",
+        "npm:sudo-prompt",
+        "npm:ws",
+        "npm:zod"
+      ]
+    },
+    "@std/assert@1.0.11": {
+      "integrity": "2461ef3c368fe88bc60e186e7744a93112f16fd110022e113a0849e94d1c83c1",
+      "dependencies": [
+        "jsr:@std/internal"
+      ]
+    },
+    "@std/internal@1.0.5": {
+      "integrity": "54a546004f769c1ac9e025abd15a76b6671ddc9687e2313b67376125650dc7ba"
+    }
+  },
+  "npm": {
+    "dotenv@16.4.7": {
+      "integrity": "sha512-47qPchRCykZC03FhkYAhrvwU4xDBFIj1QPqaarj6mdM/hgUzfPHcpkHJOn3mJAufFeeAxAzeGsr5X0M4k6fLZQ=="
+    },
+    "hono@4.6.20": {
+      "integrity": "sha512-5qfNQeaIptMaJKyoJ6N/q4gIq0DBp2FCRaLNuUI3LlJKL4S37DY/rLL1uAxA4wrPB39tJ3s+f7kgI79O4ScSug=="
+    },
+    "iconv-lite@0.6.3": {
+      "integrity": "sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw==",
+      "dependencies": [
+        "safer-buffer"
+      ]
+    },
+    "safer-buffer@2.1.2": {
+      "integrity": "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg=="
+    },
+    "sudo-prompt@9.2.1": {
+      "integrity": "sha512-Mu7R0g4ig9TUuGSxJavny5Rv0egCEtpZRNMrZaYS1vxkiIxGiGUwoezU3LazIQ+KE04hTrTfNPgxU5gzi7F5Pw=="
+    },
+    "ws@8.18.0": {
+      "integrity": "sha512-8VbfWfHLbbwu3+N6OKsOMpBdT4kXPDDB9cJk2bJ6mh9ucxdlnNvH1e+roYkKmN9Nxw2yjz7VzeO9oOz2zJ04Pw=="
+    },
+    "zod@3.24.1": {
+      "integrity": "sha512-muH7gBL9sI1nciMZV67X5fTKKBLtwpZ5VBp1vsOQzj1MhrBZ4wlVCm3gedKZWLp0Oyel8sIGfeiz54Su+OVT+A=="
+    }
+  },
+  "workspace": {
+    "dependencies": [
+      "jsr:@ayonli/jsext@^1.4.3",
+      "jsr:@std/assert@1",
+      "npm:dotenv@^16.4.7",
+      "npm:hono@^4.6.20"
+    ]
+  }
+}
