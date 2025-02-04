@@ -122,6 +122,8 @@ const app = new Hono<{ Bindings: RequestContext }>()
         const setToken = process.env.AUTH_TOKEN
         if (setToken && auth !== setToken) {
             return ctx.text("Unauthorized", { status: 401 })
+        } else if (!Object.keys(agents).length) {
+            return ctx.text("No agents available", { status: 503 })
         }
 
         const sessionId = auth
