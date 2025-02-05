@@ -49,7 +49,6 @@ async function processRequestMessage(
         }
 
         const req = new Request(url, reqInit)
-        console.log(req)
         const result = await Result.try(fetch(req))
 
         if (!result.ok) {
