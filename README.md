@@ -19,8 +19,10 @@ network traffic accordingly.
 
 ## Configuration
 
-The client program uses environment variables for configuration, we can set them
-in a `.env` file
+The program uses environment variables for configuration, we can set them in a
+`.env` file.
+
+### Common Client Env
 
 ```ini
 AGENT_ID=mac@home # A unique identifier of the proxy client
@@ -28,7 +30,18 @@ REMOTE_URL=http://localhost:8000 # The base URL of the proxy server
 LOCAL_URL=http://localhost:11434 # The base URL of the local HTTP server
 ```
 
-There is no configuration for the server.
+### Authentication
+
+#### Connection Token
+
+We can set the `CONN_TOKEN` to instruct a handshake negotiation for the proxy
+server and proxy client, both sides must set this variable to the same value.
+
+#### Request Token
+
+We can set the `AUTH_TOKEN` on the server side to instruct the server that it
+will only proxy the request if it has a `Authorization` header set to the same
+value.
 
 ## Start the program
 

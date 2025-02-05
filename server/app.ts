@@ -1,13 +1,15 @@
 import "../init.ts"
-import { asyncTask, AsyncTask, select } from "@ayonli/jsext/async"
+import { asyncTask, AsyncTask, sleep } from "@ayonli/jsext/async"
 import { crc32 } from "@ayonli/jsext/hash"
 import { RequestContext } from "@ayonli/jsext/http"
-import { Err, Result } from "@ayonli/jsext/result"
+import { Err } from "@ayonli/jsext/result"
 import { addUnhandledRejectionListener } from "@ayonli/jsext/runtime"
-import { random } from "@ayonli/jsext/string"
+import { stripStart } from "@ayonli/jsext/string"
+import { serial } from "@ayonli/jsext/number"
 import { WebSocketConnection } from "@ayonli/jsext/ws"
 import { Hono } from "hono"
 import { pack, unpack } from "msgpackr"
+import process from "node:process"
 import {
     ProxyRequestBodyFrame,
     ProxyRequestHeaderFrame,
@@ -20,7 +22,31 @@ addUnhandledRejectionListener(ev => {
     console.error("Unhandled rejection", ev.reason)
 })
 
-const agents: Record<string, WebSocketConnection> = {}
+const agents = new Map<number, { agentId: string; socket: WebSocketConnection }>()
+
+function addAgent(agentId: string, socket: WebSocketConnection) {
+    const list = Array.from(agents.values()).concat({ agentId, socket })
+    agents.clear()
+    list.forEach((agent) => {
+        const modId = crc32(agent.agentId) % list.length
+        agents.set(modId, agent)
+    })
+}
+
+function removeAgent(agentId: string) {
+    const list = Array.from(agents.values()).filter(agent => agent.agentId !== agentId)
+    agents.clear()
+    list.forEach((agent) => {
+        const modId = crc32(agent.agentId) % list.length
+        agents.set(modId, agent)
+    })
+}
+
+const idPool = serial(true)
+
+function nextId() {
+    return idPool.next().value!.toString(32)
+}
 
 const requests = new Map<string, AsyncTask<Response>>()
 const responses = new Map<string, WritableStreamDefaultWriter>()
@@ -78,9 +104,18 @@ const app = new Hono<{ Bindings: RequestContext }>()
             return ctx.json(Err("Agent ID is missing."), { status: 400 })
         }
 
+        const CONN_TOKEN = process.env.CONN_TOKEN
+        const auth = ctx.req.query("token") || ""
+        if (CONN_TOKEN && auth !== CONN_TOKEN) {
+            return new Response(null, {
+                status: 401,
+                statusText: "Unauthorized",
+            })
+        }
+
         const { response, socket } = ctx.env.upgradeWebSocket()
 
-        agents[agentId] = socket
+        addAgent(agentId, socket)
         socket.addEventListener("open", () => {
             console.log("WS Agent connected:", agentId)
         })
@@ -99,7 +134,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
             processResponseMessage(frame)
         })
         socket.addEventListener("close", () => {
-            delete agents[agentId]
+            removeAgent(agentId)
             console.log("WS Agent disconnected:", agentId)
         })
 
@@ -108,8 +143,16 @@ const app = new Hono<{ Bindings: RequestContext }>()
 
     // Proxy all requests to the agent.
     .all("/*", async ctx => {
-        const agentIds = Object.keys(agents)
-        if (!agentIds.length) {
+        const AUTH_TOKEN = process.env.AUTH_TOKEN
+        const auth = stripStart(ctx.req.header("authorization") || "", "Bearer ")
+        if (AUTH_TOKEN && auth !== AUTH_TOKEN) {
+            return new Response(null, {
+                status: 401,
+                statusText: "Unauthorized",
+            })
+        }
+
+        if (!agents.size) {
             return new Response(null, {
                 status: 503,
                 statusText: "Service Unavailable",
@@ -119,17 +162,15 @@ const app = new Hono<{ Bindings: RequestContext }>()
         const sessionId = ctx.req.header("x-forwarded-for")
             || ctx.env.remoteAddress?.hostname
             || "unknown"
-        const mod = crc32(sessionId) % agentIds.length
-        const agentId = agentIds[mod]
-        const agent = agents[agentId]
-        const requestId = random(8)
+        const modId = crc32(sessionId) % agents.size
+        const agent = agents.get(modId)!
+        const requestId = nextId()
         const req = ctx.req.raw
-        const { pathname } = new URL(req.url)
         const header = {
             requestId,
             type: "header",
             method: req.method,
-            url: pathname,
+            url: ctx.req.path,
             headers: [...req.headers.entries()],
             eof: !req.body,
         } satisfies ProxyRequestHeaderFrame
@@ -137,7 +178,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
         const task = asyncTask<Response>()
 
         requests.set(requestId, task)
-        agent.send(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
+        agent.socket.send(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
 
         if (req.body) {
             // Proxy the request body asynchronously, so that the response can
@@ -153,7 +194,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
                         eof: done,
                     }
 
-                    agent.send(pack(body))
+                    agent.socket.send(pack(body))
 
                     if (done) {
                         break
@@ -162,19 +203,13 @@ const app = new Hono<{ Bindings: RequestContext }>()
             })().catch(console.error)
         }
 
-        const result = await Result.try(select([
-            task
-        ], AbortSignal.timeout(30_000)))
+        const res = await Promise.any([task, sleep(30_000)])
         requests.delete(requestId)
 
-        if (result.ok) {
-            return result.value
-        } else {
-            return new Response(null, {
-                status: 504,
-                statusText: "Gateway Timeout",
-            })
-        }
+        return res ?? new Response(null, {
+            status: 504,
+            statusText: "Gateway Timeout",
+        })
     })
 
 export default app

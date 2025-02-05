@@ -107,7 +107,14 @@ let connectedBefore = false
 
 export function connect() {
     const { remoteUrl, agentId } = getConfig()
-    const ws = new WebSocket(stripEnd(remoteUrl, "/") + "/__connect__?agentId=" + agentId)
+    let url = stripEnd(remoteUrl, "/") + "/__connect__?agentId=" + agentId
+    const CONN_TOKEN = process.env.CONN_TOKEN
+
+    if (CONN_TOKEN) {
+        url += "&token=" + encodeURIComponent(CONN_TOKEN)
+    }
+
+    const ws = new WebSocket(url)
 
     ws.binaryType = "arraybuffer"
     ws.addEventListener("open", () => {
@@ -115,8 +122,11 @@ export function connect() {
         console.log("Connected to the server")
     })
 
-    ws.addEventListener("error", () => {
-        if (ws.readyState === WebSocket.CONNECTING ||
+    ws.addEventListener("error", (ev) => {
+        if ((ev as ErrorEvent).message?.includes("401")) {
+            console.error("Failed to connect to the server, unauthorized")
+            ws.close()
+        } else if (ws.readyState === WebSocket.CONNECTING ||
             (ws.readyState === WebSocket.CLOSED && !connectedBefore)
         ) {
             console.log("Failed to connect to the server, will retry in 5 seconds")
