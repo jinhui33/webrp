@@ -6,7 +6,7 @@ export interface ProxyFrame {
 export interface ProxyRequestHeaderFrame extends ProxyFrame {
     type: "header"
     method: string
-    url: string
+    path: string
     headers: [string, string][]
 }
 

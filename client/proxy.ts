@@ -1,5 +1,7 @@
 import "../init.ts"
+import { asyncTask, AsyncTask, sleep } from "@ayonli/jsext/async"
 import { Result } from "@ayonli/jsext/result"
+import { unrefTimer } from "@ayonli/jsext/runtime"
 import { stripEnd } from "@ayonli/jsext/string"
 import { WebSocket } from "@ayonli/jsext/ws"
 import { pack, unpack } from "msgpackr"
@@ -10,19 +12,17 @@ import {
     ProxyResponseBodyFrame,
     ProxyResponseHeaderFrame,
 } from "../header.ts"
-import { unrefTimer } from "@ayonli/jsext/runtime"
-import { asyncTask, AsyncTask, sleep } from "@ayonli/jsext/async"
 
 export function getConfig() {
-    const localUrl = process.env["LOCAL_URL"]
+    const clientId = process.env["CLIENT_ID"]
     const remoteUrl = process.env["REMOTE_URL"]
-    const agentId = process.env["AGENT_ID"]
+    const localUrl = process.env["LOCAL_URL"]
 
-    if (!localUrl || !remoteUrl || !agentId) {
-        throw new Error("LOCAL_URL, REMOTE_URL and AGENT_ID must be set")
+    if (!clientId || !remoteUrl || !localUrl) {
+        throw new Error("CLIENT_ID, REMOTE_URL and LOCAL_URL must be set")
     }
 
-    return { localUrl, remoteUrl, agentId }
+    return { clientId, remoteUrl, localUrl }
 }
 
 
@@ -34,7 +34,8 @@ async function processRequestMessage(
 ) {
     if (frame.type === "header") {
         const { localUrl } = getConfig()
-        const { requestId, method, url, headers, eof } = frame
+        const { requestId, method, path, headers, eof } = frame
+        const url = new URL(path, localUrl)
         const reqInit: RequestInit = {
             method,
             headers: new Headers(headers),
@@ -47,7 +48,8 @@ async function processRequestMessage(
             reqInit.body = readable
         }
 
-        const req = new Request(stripEnd(localUrl, "/") + url, reqInit)
+        const req = new Request(url, reqInit)
+        console.log(req)
         const result = await Result.try(fetch(req))
 
         if (!result.ok) {
@@ -106,12 +108,12 @@ async function processRequestMessage(
 }
 
 export default class ProxyClient {
-    private ws: WebSocket | null = null
+    private socket: WebSocket | null = null
     private connectedBefore = false
     private lastActive = 0
     private pingTask: AsyncTask<void> | null = null
     private healthChecker = setInterval(() => {
-        if (this.ws && this.lastActive && Date.now() - this.lastActive >= 30_000) {
+        if (this.socket && this.lastActive && Date.now() - this.lastActive >= 30_000) {
             // 30 seconds without any activity, send ping.
             this.ping().catch(console.error)
         }
@@ -122,10 +124,10 @@ export default class ProxyClient {
     }
 
     private async ping(): Promise<void> {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN)
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN)
             return
 
-        this.ws.send("ping")
+        this.socket.send("ping")
         this.pingTask = asyncTask()
         const timeout = await Promise.any([
             this.pingTask.then(() => false),
@@ -133,34 +135,34 @@ export default class ProxyClient {
         ])
 
         if (timeout) {
-            this.ws.close()
+            this.socket.close()
         }
     }
 
     connect() {
-        const { remoteUrl, agentId } = getConfig()
-        let url = stripEnd(remoteUrl, "/") + "/__connect__?agentId=" + agentId
+        const { remoteUrl, clientId } = getConfig()
+        let url = stripEnd(remoteUrl, "/") + "/__connect__?clientId=" + clientId
         const CONN_TOKEN = process.env.CONN_TOKEN
 
         if (CONN_TOKEN) {
             url += "&token=" + encodeURIComponent(CONN_TOKEN)
         }
 
-        const ws = this.ws = new WebSocket(url)
+        const socket = this.socket = new WebSocket(url)
 
-        ws.binaryType = "arraybuffer"
-        ws.addEventListener("open", () => {
+        socket.binaryType = "arraybuffer"
+        socket.addEventListener("open", () => {
             console.log("Connected to the server")
             this.connectedBefore = true
             this.lastActive = Date.now()
         })
 
-        ws.addEventListener("error", (ev) => {
+        socket.addEventListener("error", (ev) => {
             if ((ev as ErrorEvent).message?.includes("401")) {
                 console.error("Failed to connect to the server, unauthorized")
-                ws.close()
-            } else if (ws.readyState === WebSocket.CONNECTING ||
-                (ws.readyState === WebSocket.CLOSED && !this.connectedBefore)
+                socket.close()
+            } else if (socket.readyState === WebSocket.CONNECTING ||
+                (socket.readyState === WebSocket.CLOSED && !this.connectedBefore)
             ) {
                 console.log("Failed to connect to the server, will retry in 5 seconds")
                 setTimeout(() => {
@@ -171,7 +173,7 @@ export default class ProxyClient {
             }
         })
 
-        ws.addEventListener("close", () => {
+        socket.addEventListener("close", () => {
             if (this.connectedBefore) {
                 console.log("Disconnected from the server")
                 setTimeout(() => {
@@ -182,7 +184,7 @@ export default class ProxyClient {
             }
         })
 
-        ws.addEventListener("message", event => {
+        socket.addEventListener("message", event => {
             this.lastActive = Date.now()
 
             if (event.data === "pong") {
@@ -203,7 +205,7 @@ export default class ProxyClient {
 
             processRequestMessage(frame, res => {
                 const buf = pack(res)
-                ws.send(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
+                socket.send(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
             })
         })
     }

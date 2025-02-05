@@ -2,10 +2,9 @@ import "../init.ts"
 import { asyncTask, AsyncTask, sleep } from "@ayonli/jsext/async"
 import { crc32 } from "@ayonli/jsext/hash"
 import { RequestContext } from "@ayonli/jsext/http"
-import { Err } from "@ayonli/jsext/result"
+import { serial } from "@ayonli/jsext/number"
 import { addUnhandledRejectionListener } from "@ayonli/jsext/runtime"
 import { stripStart } from "@ayonli/jsext/string"
-import { serial } from "@ayonli/jsext/number"
 import { WebSocketConnection } from "@ayonli/jsext/ws"
 import { Hono } from "hono"
 import { pack, unpack } from "msgpackr"
@@ -19,29 +18,10 @@ import {
 
 addUnhandledRejectionListener(ev => {
     ev.preventDefault()
-    console.error("Unhandled rejection", ev.reason)
+    console.error("Unhandled rejection:", ev.reason)
 })
 
-const agents = new Map<number, { agentId: string; socket: WebSocketConnection }>()
-
-function addAgent(agentId: string, socket: WebSocketConnection) {
-    const list = Array.from(agents.values()).concat({ agentId, socket })
-    agents.clear()
-    list.forEach((agent) => {
-        const modId = crc32(agent.agentId) % list.length
-        agents.set(modId, agent)
-    })
-}
-
-function removeAgent(agentId: string) {
-    const list = Array.from(agents.values()).filter(agent => agent.agentId !== agentId)
-    agents.clear()
-    list.forEach((agent) => {
-        const modId = crc32(agent.agentId) % list.length
-        agents.set(modId, agent)
-    })
-}
-
+const clients: Record<string, WebSocketConnection | null> = {}
 const idPool = serial(true)
 
 function nextId() {
@@ -96,12 +76,12 @@ function processResponseMessage(frame: ProxyResponseHeaderFrame | ProxyResponseB
 }
 
 const app = new Hono<{ Bindings: RequestContext }>()
-    // An endpoint is for the agent to connect to the server using WebSocket.
+    // An endpoint is for the client to connect to the server using WebSocket.
     .get("/__connect__", ctx => {
         const { searchParams } = new URL(ctx.req.url)
-        const agentId = searchParams.get("agentId")
-        if (!agentId) {
-            return ctx.json(Err("Agent ID is missing."), { status: 400 })
+        const clientId = searchParams.get("clientId")
+        if (!clientId) {
+            return ctx.text("Client ID is missing.", { status: 400 })
         }
 
         const CONN_TOKEN = process.env.CONN_TOKEN
@@ -115,13 +95,13 @@ const app = new Hono<{ Bindings: RequestContext }>()
 
         const { response, socket } = ctx.env.upgradeWebSocket()
 
-        addAgent(agentId, socket)
         socket.addEventListener("open", () => {
-            console.log("Agent connected:", agentId)
+            clients[clientId] = socket
+            console.log("Client connected:", clientId)
         })
         socket.addEventListener("message", event => {
             if (event.data === "ping") {
-                console.log("Ping from agent:", agentId)
+                console.log("Ping from client:", clientId)
                 socket.send("pong")
                 return
             } else if (typeof event.data === "string") {
@@ -138,14 +118,14 @@ const app = new Hono<{ Bindings: RequestContext }>()
             processResponseMessage(frame)
         })
         socket.addEventListener("close", () => {
-            removeAgent(agentId)
-            console.log("Agent disconnected:", agentId)
+            clients[clientId] = null
+            console.log("Client disconnected:", clientId)
         })
 
         return response
     })
 
-    // Proxy all requests to the agent.
+    // Proxy all requests to the client.
     .all("/*", async ctx => {
         const AUTH_TOKEN = process.env.AUTH_TOKEN
         const auth = stripStart(ctx.req.header("authorization") || "", "Bearer ")
@@ -156,37 +136,45 @@ const app = new Hono<{ Bindings: RequestContext }>()
             })
         }
 
-        if (!agents.size) {
+        const _clients = Object.values(clients).filter(Boolean) as WebSocketConnection[]
+
+        if (!_clients.length) {
             return new Response(null, {
                 status: 503,
                 statusText: "Service Unavailable",
             })
         }
 
-        const sessionId = ctx.req.header("x-forwarded-for")
+        const ip = ctx.req.header("x-forwarded-for")
             || ctx.env.remoteAddress?.hostname
-            || "unknown"
-        const modId = crc32(sessionId) % agents.size
-        const agent = agents.get(modId)!
+            || ""
+        const modId = crc32(ip) % _clients.length
+        const socket = _clients[modId]
         const requestId = nextId()
         const req = ctx.req.raw
+        const { pathname, search } = new URL(req.url)
+        const headers = [...req.headers.entries()]
+        if (ip && !req.headers.has("x-forwarded-for")) {
+            headers.push(["x-forwarded-for", ip])
+        }
+
         const header = {
             requestId,
             type: "header",
             method: req.method,
-            url: ctx.req.path,
-            headers: [...req.headers.entries()],
+            path: pathname + search,
+            headers,
             eof: !req.body,
         } satisfies ProxyRequestHeaderFrame
         const buf = pack(header)
         const task = asyncTask<Response>()
 
         requests.set(requestId, task)
-        agent.socket.send(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
+        socket.send(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
 
         if (req.body) {
-            // Proxy the request body asynchronously, so that the response can
-            // be processed in parallel.
+            // Transfer the request body asynchronously, so that the response
+            // can be processed in parallel.
             (async () => {
                 const reader = req.body!.getReader()
                 while (true) {
@@ -198,7 +186,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
                         eof: done,
                     }
 
-                    agent.socket.send(pack(body))
+                    socket.send(pack(body))
 
                     if (done) {
                         break

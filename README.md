@@ -25,7 +25,7 @@ The program uses environment variables for configuration, we can set them in a
 ### Common Client Env
 
 ```ini
-AGENT_ID=mac@home # A unique identifier of the proxy client
+CLIENT_ID=mac@home # A unique identifier of the proxy client
 REMOTE_URL=http://localhost:8000 # The base URL of the proxy server
 LOCAL_URL=http://localhost:11434 # The base URL of the local HTTP server
 ```
