@@ -125,6 +125,30 @@ const app = new Hono<{ Bindings: RequestContext }>()
         return response
     })
 
+    // An endpoint is for the client to check the server's availability.
+    .get("/__ping__", ctx => {
+        const { searchParams } = new URL(ctx.req.url)
+        const clientId = searchParams.get("clientId")
+        if (!clientId) {
+            return ctx.json({
+                ok: false,
+                code: 400,
+                message: "Client ID is missing.",
+            })
+        }
+
+        const socket = clients[clientId]
+        if (!socket) {
+            return ctx.json({
+                ok: false,
+                code: 404,
+                message: "Client not found.",
+            })
+        }
+
+        return ctx.json({ ok: true, code: 200, message: "pong" })
+    })
+
     // Proxy all requests to the client.
     .all("/*", async ctx => {
         const AUTH_TOKEN = process.env.AUTH_TOKEN

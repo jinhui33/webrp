@@ -107,18 +107,25 @@ async function processRequestMessage(
 }
 
 export default class ProxyClient {
+    private remoteUrl: string
+    private clientId: string
     private socket: WebSocket | null = null
     private connectedBefore = false
     private lastActive = 0
     private pingTask: AsyncTask<void> | null = null
-    private healthChecker = setInterval(() => {
-        if (this.socket && this.lastActive && Date.now() - this.lastActive >= 30_000) {
-            // 30 seconds without any activity, send ping.
-            this.ping().catch(console.error)
-        }
-    }, 1_000)
+    private healthChecker: number | NodeJS.Timeout
 
     constructor() {
+        const { remoteUrl, clientId } = getConfig()
+        this.remoteUrl = remoteUrl
+        this.clientId = clientId
+        this.healthChecker = setInterval(() => {
+            if (this.socket && this.lastActive && Date.now() - this.lastActive >= 30_000) {
+                // 30 seconds without any activity, send ping.
+                this.ping().catch(console.error)
+            }
+        }, 1_000)
+
         unrefTimer(this.healthChecker)
     }
 
@@ -134,13 +141,41 @@ export default class ProxyClient {
         ])
 
         if (timeout) {
+            // The server is not responding to the ping, close the connection
+            // for reconnection.
+            this.socket.close()
+            return
+        }
+
+        const result = await Result.try(
+            fetch(this.remoteUrl + "/__ping__?clientId=" + this.clientId))
+        if (!result.ok) {
+            // The server is not responding to the ping, close the connection
+            // for reconnection.
+            this.socket.close()
+            return
+        }
+
+        const response = result.value
+        if (!response.ok) {
+            return // The server doesn't support the ping endpoint.
+        }
+
+        const { ok, code } = await result.value.json() as {
+            ok: boolean
+            code: number
+            message: string
+        }
+
+        if (!ok && code === 404) {
+            // The server has lost the client, usually because of a redeployment,
+            // close the connection for reconnection.
             this.socket.close()
         }
     }
 
     connect() {
-        const { remoteUrl, clientId } = getConfig()
-        let url = stripEnd(remoteUrl, "/") + "/__connect__?clientId=" + clientId
+        let url = stripEnd(this.remoteUrl, "/") + "/__connect__?clientId=" + this.clientId
         const CONN_TOKEN = process.env.CONN_TOKEN
 
         if (CONN_TOKEN) {
