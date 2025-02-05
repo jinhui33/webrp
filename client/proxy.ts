@@ -2,7 +2,6 @@ import "../init.ts"
 import { asyncTask, AsyncTask, sleep } from "@ayonli/jsext/async"
 import { Result } from "@ayonli/jsext/result"
 import { unrefTimer } from "@ayonli/jsext/runtime"
-import { stripEnd } from "@ayonli/jsext/string"
 import { WebSocket } from "@ayonli/jsext/ws"
 import { pack, unpack } from "msgpackr"
 import process from "node:process"
@@ -120,7 +119,10 @@ export default class ProxyClient {
         this.remoteUrl = remoteUrl
         this.clientId = clientId
         this.healthChecker = setInterval(() => {
-            if (this.socket && this.lastActive && Date.now() - this.lastActive >= 30_000) {
+            if (this.socket &&
+                !this.pingTask &&
+                this.lastActive && Date.now() - this.lastActive >= 30_000
+            ) {
                 // 30 seconds without any activity, send ping.
                 this.ping().catch(console.error)
             }
@@ -139,6 +141,7 @@ export default class ProxyClient {
             this.pingTask.then(() => false),
             sleep(5_000).then(() => true),
         ])
+        this.pingTask = null
 
         if (timeout) {
             // The server is not responding to the ping, close the connection
@@ -147,8 +150,10 @@ export default class ProxyClient {
             return
         }
 
-        const result = await Result.try(
-            fetch(this.remoteUrl + "/__ping__?clientId=" + this.clientId))
+        const url = new URL("__ping__", this.remoteUrl)
+        url.searchParams.set("clientId", this.clientId)
+
+        const result = await Result.try(fetch(url))
         if (!result.ok) {
             // The server is not responding to the ping, close the connection
             // for reconnection.
@@ -175,11 +180,12 @@ export default class ProxyClient {
     }
 
     connect() {
-        let url = stripEnd(this.remoteUrl, "/") + "/__connect__?clientId=" + this.clientId
-        const CONN_TOKEN = process.env.CONN_TOKEN
+        const url = new URL("/__connect__", this.remoteUrl)
+        url.searchParams.set("clientId", this.clientId)
 
+        const CONN_TOKEN = process.env.CONN_TOKEN
         if (CONN_TOKEN) {
-            url += "&token=" + encodeURIComponent(CONN_TOKEN)
+            url.searchParams.set("token", CONN_TOKEN)
         }
 
         const socket = this.socket = new WebSocket(url)
