@@ -111,10 +111,11 @@ export default class ProxyClient {
     private lastActive = 0
     private pingTask: AsyncTask<void> | null = null
     private healthChecker = setInterval(() => {
-        if (this.ws && this.lastActive && Date.now() - this.lastActive > 30_000) {
+        if (this.ws && this.lastActive && Date.now() - this.lastActive >= 30_000) {
+            // 30 seconds without any activity, send ping.
             this.ping().catch(console.error)
         }
-    }, 30_000)
+    }, 1_000)
 
     constructor() {
         unrefTimer(this.healthChecker)
