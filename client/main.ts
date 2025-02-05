@@ -1,3 +1,3 @@
-import { connect } from "./proxy.ts"
+import ProxyClient from "./proxy.ts"
 
-connect()
+new ProxyClient().connect()

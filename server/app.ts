@@ -117,10 +117,14 @@ const app = new Hono<{ Bindings: RequestContext }>()
 
         addAgent(agentId, socket)
         socket.addEventListener("open", () => {
-            console.log("WS Agent connected:", agentId)
+            console.log("Agent connected:", agentId)
         })
         socket.addEventListener("message", event => {
-            if (typeof event.data === "string") {
+            if (event.data === "ping") {
+                console.log("Ping from agent:", agentId)
+                socket.send("pong")
+                return
+            } else if (typeof event.data === "string") {
                 return
             }
 
@@ -135,7 +139,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
         })
         socket.addEventListener("close", () => {
             removeAgent(agentId)
-            console.log("WS Agent disconnected:", agentId)
+            console.log("Agent disconnected:", agentId)
         })
 
         return response
