@@ -21,6 +21,35 @@ addUnhandledRejectionListener(ev => {
     console.error("Unhandled rejection:", ev.reason)
 })
 
+const {
+    CONN_TOKEN,
+    AUTH_TOKEN,
+    AUTH_RULE,
+    FORWARD_HOST,
+} = process.env
+const authRule = AUTH_RULE ? (() => {
+    if (AUTH_RULE.startsWith("/")) {
+        const lastIndex = AUTH_RULE.lastIndexOf("/")
+        if (lastIndex > 1) {
+            const pattern = AUTH_RULE.slice(1, lastIndex)
+            const flags = AUTH_RULE.slice(lastIndex + 1)
+            if (flags && flags !== "i") {
+                console.warn("Only 'i' flag is supported in AUTH_RULE.")
+            }
+
+            return new RegExp(pattern, flags || undefined)
+        }
+
+        return new RegExp(AUTH_RULE)
+    } else {
+        return new RegExp(AUTH_RULE)
+    }
+})() : null
+
+function passAuth(path: string) {
+    return authRule ? !authRule.test(path) : false
+}
+
 const clients: Record<string, WebSocketConnection | null> = {}
 const idPool = serial(true)
 
@@ -84,7 +113,6 @@ const app = new Hono<{ Bindings: RequestContext }>()
             return ctx.text("Client ID is missing.", { status: 400 })
         }
 
-        const CONN_TOKEN = process.env.CONN_TOKEN
         const auth = ctx.req.query("token") || ""
         if (CONN_TOKEN && auth !== CONN_TOKEN) {
             return new Response("Unauthorized", {
@@ -162,10 +190,9 @@ const app = new Hono<{ Bindings: RequestContext }>()
             return ctx.text("Request ID is missing.", { status: 400 })
         }
 
-        const CONN_TOKEN = process.env.CONN_TOKEN
         const auth = ctx.req.query("token") || ""
         if (CONN_TOKEN && auth !== CONN_TOKEN) {
-            return new Response("Unauthorized", {
+            return ctx.text("Unauthorized", {
                 status: 401,
                 statusText: "Unauthorized",
             })
@@ -187,9 +214,8 @@ const app = new Hono<{ Bindings: RequestContext }>()
     .all("/*", async ctx => {
         const respondBody = !["HEAD", "OPTIONS"].includes(ctx.req.method)
 
-        const AUTH_TOKEN = process.env.AUTH_TOKEN
         const auth = stripStart(ctx.req.header("authorization") || "", "Bearer ")
-        if (AUTH_TOKEN && auth !== AUTH_TOKEN) {
+        if (AUTH_TOKEN && auth !== AUTH_TOKEN && !passAuth(ctx.req.path)) {
             return new Response(respondBody ? "Unauthorized" : null, {
                 status: 401,
                 statusText: "Unauthorized",
@@ -212,10 +238,23 @@ const app = new Hono<{ Bindings: RequestContext }>()
         const socket = _clients[modId]
         const requestId = nextId()
         const req = ctx.req.raw
-        const { pathname, search } = new URL(req.url)
-        const headers = [...req.headers.entries()]
-        if (ip && !req.headers.has("x-forwarded-for")) {
-            headers.push(["x-forwarded-for", ip])
+        const { protocol, host, pathname, search } = new URL(req.url)
+        const headers = new Headers(req.headers.entries())
+
+        if (ip && !headers.has("x-forwarded-for")) {
+            headers.set("x-forwarded-for", ip)
+        }
+
+        if (!headers.has("x-forwarded-proto")) {
+            headers.set("x-forwarded-proto", protocol.slice(0, -1))
+        }
+
+        if (!(FORWARD_HOST?.toLowerCase().match(/^(true|on|1)$/)) &&
+            !headers.has("x-forwarded-host")
+        ) {
+            headers.set("x-forwarded-host", host)
+        } else if (!headers.has("host")) {
+            headers.set("host", host)
         }
 
         const header = {
@@ -223,7 +262,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
             type: "header",
             method: req.method,
             path: pathname + search,
-            headers,
+            headers: [...headers.entries()],
             eof: !req.body,
         } satisfies ProxyRequestHeaderFrame
         const buf = pack(header)

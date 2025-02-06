@@ -16,34 +16,42 @@ export function getConfig() {
     const clientId = process.env["CLIENT_ID"]
     const remoteUrl = process.env["REMOTE_URL"]
     const localUrl = process.env["LOCAL_URL"]
+    const connToken = process.env["CONN_TOKEN"]
+    const pingInterval = Math.max(Number(process.env["PING_INTERVAL"] || "30"), 5) * 1_000
 
     if (!clientId || !remoteUrl || !localUrl) {
         throw new Error("CLIENT_ID, REMOTE_URL and LOCAL_URL must be set")
     }
 
-    return { clientId, remoteUrl, localUrl }
+    return { clientId, remoteUrl, localUrl, connToken, pingInterval }
 }
 
 export default class ProxyClient {
-    private remoteUrl: string
     private clientId: string
+    private remoteUrl: string
+    private localUrl: string
+    readonly connToken: string | undefined
     private socket: WebSocket | null = null
     private connectedBefore = false
     private lastActive = 0
     private pingTask: AsyncTask<void> | null = null
+    private pingInterval: number
     private healthChecker: number | NodeJS.Timeout
     private requests = new Map<string, WritableStreamDefaultWriter>()
 
     constructor() {
-        const { remoteUrl, clientId } = getConfig()
-        this.remoteUrl = remoteUrl
+        const { clientId, remoteUrl, localUrl, connToken, pingInterval } = getConfig()
         this.clientId = clientId
+        this.remoteUrl = remoteUrl
+        this.localUrl = localUrl
+        this.connToken = connToken
+        this.pingInterval = pingInterval
         this.healthChecker = setInterval(() => {
             if (this.socket &&
                 !this.pingTask &&
-                this.lastActive && Date.now() - this.lastActive >= 30_000
+                this.lastActive && Date.now() - this.lastActive >= this.pingInterval
             ) {
-                // 30 seconds without any activity, send ping.
+                // long time without any activity, send ping.
                 this.ping().catch(console.error)
             }
         }, 1_000)
@@ -103,9 +111,8 @@ export default class ProxyClient {
         const url = new URL("/__connect__", this.remoteUrl)
         url.searchParams.set("clientId", this.clientId)
 
-        const CONN_TOKEN = process.env.CONN_TOKEN
-        if (CONN_TOKEN) {
-            url.searchParams.set("token", CONN_TOKEN)
+        if (this.connToken) {
+            url.searchParams.set("token", this.connToken)
         }
 
         const socket = this.socket = new WebSocket(url)
@@ -147,7 +154,12 @@ export default class ProxyClient {
         socket.addEventListener("message", event => {
             this.lastActive = Date.now()
 
-            if (event.data === "pong") {
+            if (event.data === "pong" ||
+                // BUG report: Node.js WebSocket sometimes receives null when
+                // Deno/Bun sends "pong", usually after a long time without any
+                // activity.
+                (event.data === null && this.pingTask)
+            ) {
                 console.log("Pong from the server")
                 this.pingTask?.resolve()
                 return
@@ -169,10 +181,15 @@ export default class ProxyClient {
 
     private async processRequestMessage(frame: ProxyRequestHeaderFrame | ProxyRequestBodyFrame) {
         if (frame.type === "header") {
-            const { localUrl } = getConfig()
             const { requestId, method, path, headers: _headers, eof } = frame
-            const url = new URL(path, localUrl)
+            const url = new URL(path, this.localUrl)
             const headers = new Headers(_headers)
+
+            if (headers.get("x-forwarded-host")) {
+                // The original host is set in the `x-forwarded-host` header, we
+                // should set the `host` header to the target host.
+                headers.set("host", url.host)
+            }
 
             if (method === "GET" &&
                 headers.get("connection") === "Upgrade" &&
@@ -261,9 +278,8 @@ export default class ProxyClient {
         proxyUrl.searchParams.set("clientId", this.clientId)
         proxyUrl.searchParams.set("requestId", requestId)
 
-        const CONN_TOKEN = process.env.CONN_TOKEN
-        if (CONN_TOKEN) {
-            proxyUrl.searchParams.set("token", CONN_TOKEN)
+        if (this.connToken) {
+            proxyUrl.searchParams.set("token", this.connToken)
         }
 
         const client = toWebSocketStream(new WebSocket(proxyUrl))

@@ -25,9 +25,10 @@ The program uses environment variables for configuration, we can set them in a
 ### Common Client Env
 
 ```ini
-CLIENT_ID=mac@home # A unique identifier of the proxy client
-REMOTE_URL=http://localhost:8000 # The base URL of the proxy server
-LOCAL_URL=http://localhost:11434 # The base URL of the local HTTP server
+CLIENT_ID=mac@home # A unique identifier of the proxy client.
+REMOTE_URL=http://localhost:8000 # The base URL of the proxy server.
+LOCAL_URL=http://localhost:11434 # The base URL of the local HTTP server.
+PING_INTERVAL=30 # Optional, ping interval in seconds, shall not be less than 5.
 ```
 
 ### Authentication
@@ -40,17 +41,36 @@ server and proxy client, both sides must set this variable to the same value.
 #### Request Token
 
 We can set the `AUTH_TOKEN` on the server side to instruct the server that it
-will only proxy the request if it has a `Authorization` header set to the same
+will only proxy the request if it has an `Authorization` header set to the same
 value.
 
-## Start the program
+Additionally, `AUTH_RULE` is used to instruct which path should be tested for
+authentication, the value is a regular expression, for example:
 
-By default, this project runs in [Deno](https://deno.lang).
+```ini
+AUTH_RULE=^\/api\/ # Require auth for API endpoints.
+```
+
+### Forward Host
+
+By default, the request to the local web service will include an
+`X-Forwarded-Host` header, which contains the proxy server's host address, and
+leave the `Host` header to be the local address.
+
+We can, however, turn `on` the `FORWARD_HOST` setting on the server side to
+instruct the proxy program not to set the `X-Forwarded-Host` header and use
+`Host` to store the proxy server's address instead.
+
+## Start the program
 
 ### Server (CLI)
 
 ```sh
 deno task server
+# or
+npm run server
+# or
+bun run server/main.ts
 ```
 
 The above command is used to start the server in a physical machine or an ECS,
@@ -61,6 +81,10 @@ server, whatever they are, the entry file is `server/main.ts`.
 
 ```sh
 deno task client
+# or
+npm run client
+# or
+bun run client/main.ts
 ```
 
 ## Common Errors
@@ -75,3 +99,7 @@ server close to the user agent.
 
 Make sure that the proxy client and the user agent are connecting to the same
 server, use a VPN if must.
+
+However, the deploy service may spawn multiple server instances for busy network
+traffics, if the user agent and the proxy client connects to different
+instances, there is nothing we can do.
