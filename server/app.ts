@@ -5,7 +5,7 @@ import { RequestContext } from "@ayonli/jsext/http"
 import { serial } from "@ayonli/jsext/number"
 import { addUnhandledRejectionListener } from "@ayonli/jsext/runtime"
 import { stripStart } from "@ayonli/jsext/string"
-import { WebSocketConnection } from "@ayonli/jsext/ws"
+import { toWebSocketStream, WebSocketConnection, WebSocketStream } from "@ayonli/jsext/ws"
 import { Hono } from "hono"
 import { pack, unpack } from "msgpackr"
 import process from "node:process"
@@ -28,7 +28,7 @@ function nextId() {
     return idPool.next().value!.toString(32)
 }
 
-const requests = new Map<string, AsyncTask<Response>>()
+const requests = new Map<string, AsyncTask<Response | WebSocketStream>>()
 const responses = new Map<string, WritableStreamDefaultWriter>()
 
 function processResponseMessage(frame: ProxyResponseHeaderFrame | ProxyResponseBodyFrame) {
@@ -68,7 +68,7 @@ function processResponseMessage(frame: ProxyResponseHeaderFrame | ProxyResponseB
 
         if (eof) {
             responses.delete(requestId)
-            writer.close().catch(console.error)
+            writer.close().catch(() => { })
         } else if (data !== undefined) {
             writer.write(new Uint8Array(data)).catch(console.error)
         }
@@ -149,6 +149,40 @@ const app = new Hono<{ Bindings: RequestContext }>()
         return ctx.json({ ok: true, code: 200, message: "pong" })
     })
 
+    // An endpoint is for WebSocket proxy.
+    .get("/__ws__", ctx => {
+        const { searchParams } = new URL(ctx.req.url)
+        const clientId = searchParams.get("clientId")
+        if (!clientId) {
+            return ctx.text("Client ID is missing.", { status: 400 })
+        }
+
+        const requestId = searchParams.get("requestId")
+        if (!requestId) {
+            return ctx.text("Request ID is missing.", { status: 400 })
+        }
+
+        const CONN_TOKEN = process.env.CONN_TOKEN
+        const auth = ctx.req.query("token") || ""
+        if (CONN_TOKEN && auth !== CONN_TOKEN) {
+            return new Response(null, {
+                status: 401,
+                statusText: "Unauthorized",
+            })
+        }
+
+        const request = requests.get(requestId)
+        if (!request) {
+            return ctx.text("Request not found.", { status: 404 })
+        }
+
+        const { response, socket } = ctx.env.upgradeWebSocket()
+        const server = toWebSocketStream(socket)
+        request.resolve(server)
+
+        return response
+    })
+
     // Proxy all requests to the client.
     .all("/*", async ctx => {
         const AUTH_TOKEN = process.env.AUTH_TOKEN
@@ -191,7 +225,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
             eof: !req.body,
         } satisfies ProxyRequestHeaderFrame
         const buf = pack(header)
-        const task = asyncTask<Response>()
+        const task = asyncTask<Response | WebSocketStream>()
 
         requests.set(requestId, task)
         socket.send(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
@@ -222,7 +256,42 @@ const app = new Hono<{ Bindings: RequestContext }>()
         const res = await Promise.any([task, sleep(30_000)])
         requests.delete(requestId)
 
-        return res ?? new Response(null, {
+        if (res instanceof Response) {
+            return res
+        }
+
+        if (res instanceof WebSocketStream) {
+            const server = res
+            const { response, socket } = ctx.env.upgradeWebSocket()
+            const client = toWebSocketStream(socket);
+
+            (async () => {
+                const {
+                    readable: serverReadable,
+                    writable: serverWritable,
+                } = await server.opened
+                const {
+                    readable: clientReadable,
+                    writable: clientWritable,
+                } = await client.opened
+
+                serverReadable.pipeTo(clientWritable)
+                clientReadable.pipeTo(serverWritable)
+
+                server.closed.then(() => {
+                    // deno-lint-ignore no-empty
+                    try { client.close() } catch { }
+                })
+                client.closed.then(() => {
+                    // deno-lint-ignore no-empty
+                    try { server.close() } catch { }
+                })
+            })()
+
+            return response
+        }
+
+        return new Response(null, {
             status: 504,
             statusText: "Gateway Timeout",
         })

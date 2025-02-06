@@ -2,7 +2,7 @@ import "../init.ts"
 import { asyncTask, AsyncTask, sleep } from "@ayonli/jsext/async"
 import { Result } from "@ayonli/jsext/result"
 import { unrefTimer } from "@ayonli/jsext/runtime"
-import { WebSocket } from "@ayonli/jsext/ws"
+import { toWebSocketStream, WebSocket } from "@ayonli/jsext/ws"
 import { pack, unpack } from "msgpackr"
 import process from "node:process"
 import {
@@ -24,87 +24,6 @@ export function getConfig() {
     return { clientId, remoteUrl, localUrl }
 }
 
-
-const requests = new Map<string, WritableStreamDefaultWriter>()
-
-async function processRequestMessage(
-    frame: ProxyRequestHeaderFrame | ProxyRequestBodyFrame,
-    respond: (frame: ProxyResponseHeaderFrame | ProxyResponseBodyFrame) => void
-) {
-    if (frame.type === "header") {
-        const { localUrl } = getConfig()
-        const { requestId, method, path, headers, eof } = frame
-        const url = new URL(path, localUrl)
-        const reqInit: RequestInit = {
-            method,
-            headers: new Headers(headers),
-        }
-
-        if (!eof) {
-            const { readable, writable } = new TransformStream()
-            const writer = writable.getWriter()
-            requests.set(requestId, writer)
-            reqInit.body = readable
-        }
-
-        const req = new Request(url, reqInit)
-        const result = await Result.try(fetch(req))
-
-        if (!result.ok) {
-            return respond({
-                requestId,
-                type: "header",
-                status: 502,
-                statusText: "Bad Gateway",
-                headers: [],
-                eof: true,
-            })
-        }
-
-        const res = result.value
-
-        respond({
-            requestId,
-            type: "header",
-            status: res.status,
-            statusText: res.statusText,
-            headers: Array.from(res.headers.entries()),
-            eof: !res.body,
-        })
-
-        if (res.body) {
-            const reader = res.body.getReader()
-            while (true) {
-                const { done, value } = await reader.read()
-                respond({
-                    requestId,
-                    type: "body",
-                    data: value === undefined ? undefined : new Uint8Array(value),
-                    eof: done,
-                })
-
-                if (done) {
-                    break
-                }
-            }
-        }
-    } else if (frame.type === "body") {
-        const { requestId, data, eof } = frame
-        const writer = requests.get(requestId)
-
-        if (!writer) {
-            return
-        }
-
-        if (eof) {
-            requests.delete(requestId)
-            writer.close().catch(console.error)
-        } else if (data !== undefined) {
-            writer.write(new Uint8Array(data)).catch(console.error)
-        }
-    }
-}
-
 export default class ProxyClient {
     private remoteUrl: string
     private clientId: string
@@ -113,6 +32,7 @@ export default class ProxyClient {
     private lastActive = 0
     private pingTask: AsyncTask<void> | null = null
     private healthChecker: number | NodeJS.Timeout
+    private requests = new Map<string, WritableStreamDefaultWriter>()
 
     constructor() {
         const { remoteUrl, clientId } = getConfig()
@@ -243,10 +163,135 @@ export default class ProxyClient {
                 return
             }
 
-            processRequestMessage(frame, res => {
-                const buf = pack(res)
-                socket.send(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
-            })
+            this.processRequestMessage(frame)
         })
+    }
+
+    private async processRequestMessage(frame: ProxyRequestHeaderFrame | ProxyRequestBodyFrame) {
+        if (frame.type === "header") {
+            const { localUrl } = getConfig()
+            const { requestId, method, path, headers: _headers, eof } = frame
+            const url = new URL(path, localUrl)
+            const headers = new Headers(_headers)
+
+            if (method === "GET" &&
+                headers.get("connection") === "Upgrade" &&
+                headers.get("upgrade") === "websocket"
+            ) {
+                return this.processWebSocketRequest(requestId, url, headers)
+            }
+
+            const reqInit: RequestInit = { method, headers }
+
+            if (!eof) {
+                const { readable, writable } = new TransformStream()
+                const writer = writable.getWriter()
+                this.requests.set(requestId, writer)
+                reqInit.body = readable
+            }
+
+            const req = new Request(url, reqInit)
+            const result = await Result.try(fetch(req))
+
+            if (!result.ok) {
+                return this.respond({
+                    requestId,
+                    type: "header",
+                    status: 502,
+                    statusText: "Bad Gateway",
+                    headers: [],
+                    eof: true,
+                })
+            }
+
+            const res = result.value
+
+            this.respond({
+                requestId,
+                type: "header",
+                status: res.status,
+                statusText: res.statusText,
+                headers: Array.from(res.headers.entries()),
+                eof: !res.body,
+            })
+
+            if (res.body) {
+                const reader = res.body.getReader()
+                while (true) {
+                    const { done, value } = await reader.read()
+                    this.respond({
+                        requestId,
+                        type: "body",
+                        data: value === undefined ? undefined : new Uint8Array(value),
+                        eof: done,
+                    })
+
+                    if (done) {
+                        break
+                    }
+                }
+            }
+        } else if (frame.type === "body") {
+            const { requestId, data, eof } = frame
+            const writer = this.requests.get(requestId)
+
+            if (!writer) {
+                return
+            }
+
+            if (eof) {
+                this.requests.delete(requestId)
+                writer.close().catch(console.error)
+            } else if (data !== undefined) {
+                writer.write(new Uint8Array(data)).catch(console.error)
+            }
+        }
+    }
+
+    private async processWebSocketRequest(requestId: string, url: URL, headers: Headers) {
+        const protocols = headers.get("sec-websocket-protocol") ?? undefined
+        const socket = new WebSocket(url, protocols)
+
+        const server = toWebSocketStream(socket)
+        const proxyUrl = new URL("/__ws__", this.remoteUrl)
+        proxyUrl.searchParams.set("clientId", this.clientId)
+        proxyUrl.searchParams.set("requestId", requestId)
+
+        const CONN_TOKEN = process.env.CONN_TOKEN
+        if (CONN_TOKEN) {
+            proxyUrl.searchParams.set("token", CONN_TOKEN)
+        }
+
+        const client = toWebSocketStream(new WebSocket(proxyUrl))
+
+        const {
+            readable: serverReadable,
+            writable: serverWritable,
+        } = await server.opened
+        const {
+            readable: clientReadable,
+            writable: clientWritable,
+        } = await client.opened
+
+        serverReadable.pipeTo(clientWritable)
+        clientReadable.pipeTo(serverWritable)
+
+        server.closed.then(() => {
+            // deno-lint-ignore no-empty
+            try { client.close() } catch { }
+        })
+        client.closed.then(() => {
+            // deno-lint-ignore no-empty
+            try { server.close() } catch { }
+        })
+    }
+
+    private respond(frame: ProxyResponseHeaderFrame | ProxyResponseBodyFrame) {
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+            return
+        }
+
+        const buf = pack(frame)
+        this.socket.send(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
     }
 }
