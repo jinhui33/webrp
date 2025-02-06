@@ -1,3 +1,4 @@
+import "../init.ts"
 import { serve } from "@ayonli/jsext/http"
 import app from "./app.ts"
 

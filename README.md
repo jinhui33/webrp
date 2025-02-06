@@ -8,8 +8,10 @@ without the need of an ECS.
 This project includes a server and a client, which communicate via WebSocket.
 
 The server can be run in a cloud-based ECS, an Edge Computing service such as
-Deno Deploy and Cloudflare Workers, or anywhere that is reachable on the
-Internet.
+Deno Deploy, or other kind of hosting service.
+
+_(NOTE: Cloudflare Workers is not supported at the moment, since it_
+_`Cannot perform I/O` across different requests.)_
 
 The server transfer all HTTP requests to the client, who will eventually proxy
 them to the local service.
@@ -93,9 +95,9 @@ bun run client/main.ts
 
 If there are clients running, and this error still occurs, it's probably because
 the proxy client and the user agent connect to different servers, which is
-common if the proxy server is deployed on Deno Deploy or Cloudflare Workers, or
-other Edge Computing services, where network traffic are redirected to the
-server close to the user agent.
+common if the proxy server is deployed on Deno Deploy or other Edge Computing
+services, where network traffic are redirected to the server close to the user
+agent.
 
 Make sure that the proxy client and the user agent are connecting to the same
 server, use a VPN if must.

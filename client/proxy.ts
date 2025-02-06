@@ -1,10 +1,8 @@
-import "../init.ts"
 import { asyncTask, AsyncTask, sleep } from "@ayonli/jsext/async"
 import { Result } from "@ayonli/jsext/result"
-import { unrefTimer } from "@ayonli/jsext/runtime"
+import { env, unrefTimer } from "@ayonli/jsext/runtime"
 import { toWebSocketStream, WebSocket } from "@ayonli/jsext/ws"
 import { pack, unpack } from "msgpackr"
-import process from "node:process"
 import {
     ProxyRequestBodyFrame,
     ProxyRequestHeaderFrame,
@@ -13,11 +11,11 @@ import {
 } from "../header.ts"
 
 export function getConfig() {
-    const clientId = process.env["CLIENT_ID"]
-    const remoteUrl = process.env["REMOTE_URL"]
-    const localUrl = process.env["LOCAL_URL"]
-    const connToken = process.env["CONN_TOKEN"]
-    const pingInterval = Math.max(Number(process.env["PING_INTERVAL"] || "30"), 5) * 1_000
+    const clientId = env("CLIENT_ID")
+    const remoteUrl = env("REMOTE_URL")
+    const localUrl = env("LOCAL_URL")
+    const connToken = env("CONN_TOKEN")
+    const pingInterval = Math.max(Number(env("PING_INTERVAL") || "30"), 5) * 1_000
 
     if (!clientId || !remoteUrl || !localUrl) {
         throw new Error("CLIENT_ID, REMOTE_URL and LOCAL_URL must be set")

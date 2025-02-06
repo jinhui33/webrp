@@ -1,14 +1,12 @@
-import "../init.ts"
 import { asyncTask, AsyncTask, sleep } from "@ayonli/jsext/async"
 import { crc32 } from "@ayonli/jsext/hash"
 import { RequestContext } from "@ayonli/jsext/http"
 import { serial } from "@ayonli/jsext/number"
-import { addUnhandledRejectionListener } from "@ayonli/jsext/runtime"
+import runtime, { addUnhandledRejectionListener, env } from "@ayonli/jsext/runtime"
 import { stripStart } from "@ayonli/jsext/string"
-import { toWebSocketStream, WebSocketConnection, WebSocketStream } from "@ayonli/jsext/ws"
+import { toWebSocketStream, WebSocketConnection, WebSocketServer, WebSocketStream } from "@ayonli/jsext/ws"
 import { Hono } from "hono"
 import { pack, unpack } from "msgpackr"
-import process from "node:process"
 import {
     ProxyRequestBodyFrame,
     ProxyRequestHeaderFrame,
@@ -21,13 +19,9 @@ addUnhandledRejectionListener(ev => {
     console.error("Unhandled rejection:", ev.reason)
 })
 
-const {
-    CONN_TOKEN,
-    AUTH_TOKEN,
-    AUTH_RULE,
-    FORWARD_HOST,
-} = process.env
-const authRule = AUTH_RULE ? (() => {
+let authRule: RegExp | null = null
+
+function createAuthRule(AUTH_RULE: string) {
     if (AUTH_RULE.startsWith("/")) {
         const lastIndex = AUTH_RULE.lastIndexOf("/")
         if (lastIndex > 1) {
@@ -44,11 +38,13 @@ const authRule = AUTH_RULE ? (() => {
     } else {
         return new RegExp(AUTH_RULE)
     }
-})() : null
+}
 
 function passAuth(path: string) {
     return authRule ? !authRule.test(path) : false
 }
+
+const wsServer = new WebSocketServer()
 
 const clients: Record<string, WebSocketConnection | null> = {}
 const idPool = serial(true)
@@ -104,9 +100,18 @@ function processResponseMessage(frame: ProxyResponseHeaderFrame | ProxyResponseB
     }
 }
 
-const app = new Hono<{ Bindings: RequestContext }>()
+const app = new Hono<{ Bindings: any }>()
     // An endpoint is for the client to connect to the server using WebSocket.
     .get("/__connect__", ctx => {
+        if (runtime().identity === "workerd") {
+            env(ctx.env) // initialize the environment for the worker
+        }
+
+        const { AUTH_RULE } = env()
+        if (AUTH_RULE) {
+            authRule ??= createAuthRule(AUTH_RULE)
+        }
+
         const { searchParams } = new URL(ctx.req.url)
         const clientId = searchParams.get("clientId")
         if (!clientId) {
@@ -114,6 +119,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
         }
 
         const auth = ctx.req.query("token") || ""
+        const { CONN_TOKEN } = env()
         if (CONN_TOKEN && auth !== CONN_TOKEN) {
             return new Response("Unauthorized", {
                 status: 401,
@@ -121,7 +127,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
             })
         }
 
-        const { response, socket } = ctx.env.upgradeWebSocket()
+        const { response, socket } = wsServer.upgrade(ctx.req.raw)
 
         socket.addEventListener("open", () => {
             clients[clientId] = socket
@@ -191,6 +197,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
         }
 
         const auth = ctx.req.query("token") || ""
+        const { CONN_TOKEN } = env()
         if (CONN_TOKEN && auth !== CONN_TOKEN) {
             return ctx.text("Unauthorized", {
                 status: 401,
@@ -203,7 +210,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
             return ctx.text("Request not found.", { status: 404 })
         }
 
-        const { response, socket } = ctx.env.upgradeWebSocket()
+        const { response, socket } = wsServer.upgrade(ctx.req.raw)
         const server = toWebSocketStream(socket)
         request.resolve(server)
 
@@ -215,6 +222,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
         const respondBody = !["HEAD", "OPTIONS"].includes(ctx.req.method)
 
         const auth = stripStart(ctx.req.header("authorization") || "", "Bearer ")
+        const { AUTH_TOKEN } = env()
         if (AUTH_TOKEN && auth !== AUTH_TOKEN && !passAuth(ctx.req.path)) {
             return new Response(respondBody ? "Unauthorized" : null, {
                 status: 401,
@@ -231,9 +239,16 @@ const app = new Hono<{ Bindings: RequestContext }>()
             })
         }
 
-        const ip = ctx.req.header("x-forwarded-for")
-            || ctx.env.remoteAddress?.hostname
-            || ""
+        let ip = ctx.req.header("x-forwarded-for")
+        if (!ip) {
+            if ("remoteAddress" in ctx.env) {
+                ip = (ctx.env as RequestContext)?.remoteAddress?.hostname
+            } else if ("remoteAddr" in ctx.env) {
+                ip = (ctx.env as Deno.ServeHandlerInfo<Deno.NetAddr>)?.remoteAddr?.hostname
+            }
+
+            ip ||= ""
+        }
         const modId = crc32(ip) % _clients.length
         const socket = _clients[modId]
         const requestId = nextId()
@@ -249,6 +264,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
             headers.set("x-forwarded-proto", protocol.slice(0, -1))
         }
 
+        const { FORWARD_HOST } = env()
         if (!(FORWARD_HOST?.toLowerCase().match(/^(true|on|1)$/)) &&
             !headers.has("x-forwarded-host")
         ) {
@@ -303,7 +319,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
 
         if (res instanceof WebSocketStream) {
             const server = res
-            const { response, socket } = ctx.env.upgradeWebSocket()
+            const { response, socket } = wsServer.upgrade(ctx.req.raw)
             const client = toWebSocketStream(socket);
 
             (async () => {
