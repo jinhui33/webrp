@@ -65,7 +65,7 @@ deno task client
 
 ## Common Errors
 
-### 503 Service Unavailable
+### 503 No proxy client
 
 If there are clients running, and this error still occurs, it's probably because
 the proxy client and the user agent connect to different servers, which is

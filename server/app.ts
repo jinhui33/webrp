@@ -87,7 +87,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
         const CONN_TOKEN = process.env.CONN_TOKEN
         const auth = ctx.req.query("token") || ""
         if (CONN_TOKEN && auth !== CONN_TOKEN) {
-            return new Response(null, {
+            return new Response("Unauthorized", {
                 status: 401,
                 statusText: "Unauthorized",
             })
@@ -165,7 +165,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
         const CONN_TOKEN = process.env.CONN_TOKEN
         const auth = ctx.req.query("token") || ""
         if (CONN_TOKEN && auth !== CONN_TOKEN) {
-            return new Response(null, {
+            return new Response("Unauthorized", {
                 status: 401,
                 statusText: "Unauthorized",
             })
@@ -185,10 +185,12 @@ const app = new Hono<{ Bindings: RequestContext }>()
 
     // Proxy all requests to the client.
     .all("/*", async ctx => {
+        const respondBody = !["HEAD", "OPTIONS"].includes(ctx.req.method)
+
         const AUTH_TOKEN = process.env.AUTH_TOKEN
         const auth = stripStart(ctx.req.header("authorization") || "", "Bearer ")
         if (AUTH_TOKEN && auth !== AUTH_TOKEN) {
-            return new Response(null, {
+            return new Response(respondBody ? "Unauthorized" : null, {
                 status: 401,
                 statusText: "Unauthorized",
             })
@@ -197,7 +199,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
         const _clients = Object.values(clients).filter(Boolean) as WebSocketConnection[]
 
         if (!_clients.length) {
-            return new Response(null, {
+            return new Response(respondBody ? "No proxy client" : null, {
                 status: 503,
                 statusText: "Service Unavailable",
             })
@@ -291,7 +293,7 @@ const app = new Hono<{ Bindings: RequestContext }>()
             return response
         }
 
-        return new Response(null, {
+        return new Response(respondBody ? "Proxy client timeout" : null, {
             status: 504,
             statusText: "Gateway Timeout",
         })
