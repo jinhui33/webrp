@@ -29,7 +29,7 @@ function nextId() {
 }
 
 const requests = new Map<string, AsyncTask<Response | WebSocketStream>>()
-const responses = new Map<string, WritableStreamDefaultWriter>()
+const responses = new Map<string, WritableStreamDefaultWriter<Uint8Array>>()
 
 function processResponseMessage(frame: ProxyResponseHeaderFrame | ProxyResponseBodyFrame) {
     if (frame.type === "header") {

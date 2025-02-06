@@ -211,7 +211,11 @@ export default class ProxyClient {
                 type: "header",
                 status: res.status,
                 statusText: res.statusText,
-                headers: Array.from(res.headers.entries()),
+                headers: Array.from(res.headers.entries()).filter(([field]) => {
+                    // The stream of response body is always decompressed.
+                    // We need to remove the `content-encoding` header if present.
+                    return field !== "content-encoding"
+                }),
                 eof: !res.body,
             })
 
@@ -222,7 +226,7 @@ export default class ProxyClient {
                     this.respond({
                         requestId,
                         type: "body",
-                        data: value === undefined ? undefined : new Uint8Array(value),
+                        data: value,
                         eof: done,
                     })
 

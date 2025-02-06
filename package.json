@@ -1,0 +1,18 @@
+{
+    "private": true,
+    "name": "@ayonli/webrp",
+    "type": "module",
+    "scripts": {
+        "client": "tsx client/main.ts",
+        "server": "tsx --import=@ayonli/jsext/http server/main.ts"
+    },
+    "dependencies": {
+        "@ayonli/jsext": "^1.4.4",
+        "dotenv": "^16.4.7",
+        "hono": "^4.6.20",
+        "msgpackr": "^1.11.2"
+    },
+    "devDependencies": {
+        "tsx": "^4.19.2"
+    }
+}
