@@ -1,7 +1,7 @@
-# NAT Web Reverse Proxy
+# WebRP (Web Reverse Proxy)
 
-A Reverse Proxy for locally deployed web services to bypass NAT without the need
-of an ECS.
+A web-based Reverse Proxy for locally deployed web services to bypass NAT
+without the need of an ECS.
 
 ## Concept
 
@@ -73,9 +73,5 @@ common if the proxy server is deployed on Deno Deploy or Cloudflare Workers, or
 other Edge Computing services, where network traffic are redirected to the
 server close to the user agent.
 
-To solve this problem, we can manually set the domain name of proxy server to a
-static address in the `/etc/hosts` file so the proxy client will always connect
-to a known server.
-
-However, for user agents, if they are mobile phones, I don't know if there is a
-way to do so.
+Make sure that the proxy client and the user agent are connecting to the same
+server, use a VPN if must.
