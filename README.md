@@ -43,8 +43,13 @@ server and proxy client, both sides must set this variable to the same value.
 #### Request Token
 
 We can set the `AUTH_TOKEN` on the server side to instruct the server that it
-will only proxy the request if it has an `Authorization` header set to the same
-value.
+will only proxy the request if one of these headers is set to the same value:
+
+- `X-Auth-Token`
+- `Authorization`
+
+`X-Auth-Token` is preferred, since `Authorization` may be used by the proxied
+service itself. A `Bearer` prefix may be attached.
 
 Additionally, `AUTH_RULE` is used to instruct which path should be tested for
 authentication, the value is a regular expression, for example:

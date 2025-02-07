@@ -221,7 +221,10 @@ const app = new Hono<{ Bindings: any }>()
     .all("/*", async ctx => {
         const respondBody = !["HEAD", "OPTIONS"].includes(ctx.req.method)
 
-        const auth = stripStart(ctx.req.header("authorization") || "", "Bearer ")
+        let auth = ctx.req.header("x-auth-token")
+            || ctx.req.header("authorization")
+        auth &&= stripStart(auth, "Bearer ")
+
         const { AUTH_TOKEN } = env()
         if (AUTH_TOKEN && auth !== AUTH_TOKEN && !passAuth(ctx.req.path)) {
             return new Response(respondBody ? "Unauthorized" : null, {
