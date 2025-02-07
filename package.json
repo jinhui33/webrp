@@ -3,11 +3,14 @@
     "name": "@ayonli/webrp",
     "type": "module",
     "scripts": {
+        "build": "npm run build:client && npm run build:server",
+        "build:client": "bun build client/main.ts --target=node --outfile=dist/client.js",
+        "build:server": "bun build server/main.ts --target=node --outfile=dist/server.js",
         "client": "tsx client/main.ts",
         "server": "tsx --import=@ayonli/jsext/http server/main.ts"
     },
     "dependencies": {
-        "@ayonli/jsext": "^1.4.4",
+        "@ayonli/jsext": "^1.4.6",
         "dotenv": "^16.4.7",
         "hono": "^4.6.20",
         "msgpackr": "^1.11.2"

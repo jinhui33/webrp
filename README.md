@@ -63,29 +63,57 @@ We can, however, turn `on` the `FORWARD_HOST` setting on the server side to
 instruct the proxy program not to set the `X-Forwarded-Host` header and use
 `Host` to store the proxy server's address instead.
 
-## Start the program
+## Deploy the Server
 
-### Server (CLI)
+### Deno Deploy
+
+Fork this repository and sign into Deno Deploy, follow the deployment guidance,
+select the forked repository and set the entry point to `server/main.ts`.
+
+### ECS or Physical/Virtual Machine
+
+Clone this repository and use the CLI to start the proxy server.
 
 ```sh
+deno install
 deno task server
 # or
+npm install
 npm run server
 # or
+bun install
 bun run server/main.ts
 ```
 
-The above command is used to start the server in a physical machine or an ECS,
-Edge Computing services or hosting services have their own ways to start the
-server, whatever they are, the entry file is `server/main.ts`.
+### Restricted Node.js Hosting Services
 
-### Client
+This is for Node.js Hosting Services where we don't manage the server ourselves,
+similar to Deno Deploy but for Node.js applications.
+
+Clone this repository on a physical machine, install [Bun](https://bun.sh). Run
+the following commands to build and bundle the program.
 
 ```sh
+bun install
+bun build
+```
+
+Upload `dist/server.js` to the hosting service and set the entry point to
+`dist/server.js` (depends on where the file is located).
+
+### Start the Client
+
+Clone this repository in a machine behind a NAT, and use the following commands
+to start the proxy client.
+
+```sh
+deno install
 deno task client
 # or
+npm install
 npm run client
 # or
+bun install
 bun run client/main.ts
 ```
 

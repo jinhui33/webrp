@@ -196,7 +196,12 @@ export default class ProxyClient {
                 return this.processWebSocketRequest(requestId, url, headers)
             }
 
-            const reqInit: RequestInit = { method, headers }
+            const reqInit: RequestInit = {
+                method,
+                headers,
+                // @ts-ignore for Node.js
+                duplex: "half",
+            }
 
             if (!eof) {
                 const { readable, writable } = new TransformStream()
@@ -237,15 +242,20 @@ export default class ProxyClient {
             if (res.body) {
                 const reader = res.body.getReader()
                 while (true) {
-                    const { done, value } = await reader.read()
-                    this.respond({
-                        requestId,
-                        type: "body",
-                        data: value,
-                        eof: done,
-                    })
+                    try {
+                        const { done, value } = await reader.read()
+                        this.respond({
+                            requestId,
+                            type: "body",
+                            data: value,
+                            eof: done,
+                        })
 
-                    if (done) {
+                        if (done) {
+                            break
+                        }
+                    } catch {
+                        // Happens when the connection is closed prematurely.
                         break
                     }
                 }
