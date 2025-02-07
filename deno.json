@@ -4,7 +4,7 @@
         "server": "deno serve --allow-read --allow-env --allow-ffi server/main.ts"
     },
     "imports": {
-        "@ayonli/jsext": "jsr:@ayonli/jsext@^1.4.6",
+        "@ayonli/jsext": "jsr:@ayonli/jsext@^1.4.7",
         "dotenv": "npm:dotenv@^16.4.7",
         "hono": "npm:hono@^4.6.20",
         "msgpackr": "npm:msgpackr@^1.11.2"

@@ -1,7 +1,8 @@
 {
   "version": "4",
   "specifiers": {
-    "jsr:@ayonli/jsext@^1.4.6": "1.4.6",
+    "jsr:@ayonli/jsext@^1.4.7": "1.4.7",
+    "npm:@ayonli/jsext@^1.4.7": "1.4.7",
     "npm:dotenv@^16.4.7": "16.4.7",
     "npm:hono@^4.6.20": "4.6.20",
     "npm:iconv-lite@~0.6.3": "0.6.3",
@@ -12,8 +13,8 @@
     "npm:zod@^3.23.8": "3.24.1"
   },
   "jsr": {
-    "@ayonli/jsext@1.4.6": {
-      "integrity": "677f02fa5db9e23fadc7bb8c5b0f729751a4ddcbd601fb892e3c66b2bb98be7a",
+    "@ayonli/jsext@1.4.7": {
+      "integrity": "18dcdce6f4fec2dc44c4cf49dec523ac50143e12102bc24f033b8470c1a9bfb3",
       "dependencies": [
         "npm:iconv-lite",
         "npm:sudo-prompt",
@@ -23,6 +24,15 @@
     }
   },
   "npm": {
+    "@ayonli/jsext@1.4.7": {
+      "integrity": "sha512-7qtv7aV1DWgPQX8sr8xNMLoY6URzg110Et0lTYWj87b+vxuIQijRMgNRQ4sp41jeCoQar9y/seuL4OLhp8cmkA==",
+      "dependencies": [
+        "iconv-lite",
+        "sudo-prompt",
+        "ws",
+        "zod"
+      ]
+    },
     "@esbuild/aix-ppc64@0.23.1": {
       "integrity": "sha512-6VhYk1diRqrhBAqpJEdjASR/+WVRtfjpqKuNw11cLiaWpAT/Uu+nokB+UJnevzy/P9C/ty6AOe0dwueMrGh/iQ=="
     },
@@ -216,14 +226,14 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@ayonli/jsext@^1.4.6",
+      "jsr:@ayonli/jsext@^1.4.7",
       "npm:dotenv@^16.4.7",
       "npm:hono@^4.6.20",
       "npm:msgpackr@^1.11.2"
     ],
     "packageJson": {
       "dependencies": [
-        "npm:@ayonli/jsext@^1.4.6",
+        "npm:@ayonli/jsext@^1.4.7",
         "npm:dotenv@^16.4.7",
         "npm:hono@^4.6.20",
         "npm:msgpackr@^1.11.2",
