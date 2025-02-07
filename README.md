@@ -63,6 +63,13 @@ We can, however, turn `on` the `FORWARD_HOST` setting on the server side to
 instruct the proxy program not to set the `X-Forwarded-Host` header and use
 `Host` to store the proxy server's address instead.
 
+### Force CORS
+
+Some web services may have strict CORS policy that forbids untrusted requests,
+sometimes it even causes unwanted rejections. We can turn `on` the `FORCE_CORS`
+setting on the server side to instruct the proxy to remove the `Origin` header
+so that CORS policy can be bypassed.
+
 ## Deploy the Server
 
 ### Deno Deploy
