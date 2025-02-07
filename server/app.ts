@@ -273,6 +273,11 @@ const app = new Hono<{ Bindings: any }>()
             headers.set("host", host)
         }
 
+        const { FORCE_CORS } = env()
+        if (FORCE_CORS?.toLowerCase().match(/^(true|on|1)$/)) {
+            headers.delete("origin")
+        }
+
         const header = {
             requestId,
             type: "header",
