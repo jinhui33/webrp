@@ -28,10 +28,10 @@ export default class ProxyClient {
     private socket: WebSocket | null = null
     private connectedBefore = false
     private lastActive = 0
+    private requestWriters = new Map<string, WritableStreamDefaultWriter>()
     private pingTask: AsyncTask<void> | null = null
     private pingInterval: number
     private healthChecker: number | NodeJS.Timeout
-    private requests = new Map<string, WritableStreamDefaultWriter>()
 
     constructor(options: ProxyClientOptions) {
         const { clientId, remoteUrl, localUrl, connToken, pingInterval, logPrefix } = options
@@ -213,7 +213,7 @@ export default class ProxyClient {
             if (!eof) {
                 const { readable, writable } = new TransformStream()
                 const writer = writable.getWriter()
-                this.requests.set(requestId, writer)
+                this.requestWriters.set(requestId, writer)
                 reqInit.body = readable
             }
 
@@ -263,20 +263,26 @@ export default class ProxyClient {
                         }
                     } catch {
                         // Happens when the connection is closed prematurely.
+                        this.respond({
+                            requestId,
+                            type: "body",
+                            data: undefined,
+                            eof: true,
+                        })
                         break
                     }
                 }
             }
         } else if (frame.type === "body") {
             const { requestId, data, eof } = frame
-            const writer = this.requests.get(requestId)
+            const writer = this.requestWriters.get(requestId)
 
             if (!writer) {
                 return
             }
 
             if (eof) {
-                this.requests.delete(requestId)
+                this.requestWriters.delete(requestId)
                 writer.close().catch(console.error)
             } else if (data !== undefined) {
                 writer.write(new Uint8Array(data)).catch(console.error)
@@ -286,38 +292,36 @@ export default class ProxyClient {
 
     private async processWebSocketRequest(requestId: string, url: URL, headers: Headers) {
         const protocols = headers.get("sec-websocket-protocol") ?? undefined
-        const socket = new WebSocket(url, protocols)
+        const upstreamPort = toWebSocketStream(new WebSocket(url, protocols))
 
-        const server = toWebSocketStream(socket)
         const proxyUrl = new URL("/__ws__", this.remoteUrl)
         proxyUrl.searchParams.set("clientId", this.clientId)
         proxyUrl.searchParams.set("requestId", requestId)
-
         if (this.connToken) {
             proxyUrl.searchParams.set("token", this.connToken)
         }
 
-        const client = toWebSocketStream(new WebSocket(proxyUrl))
+        const downstreamPort = toWebSocketStream(new WebSocket(proxyUrl))
 
         const {
-            readable: serverReadable,
-            writable: serverWritable,
-        } = await server.opened
+            readable: upstreamIncoming,
+            writable: upstreamOutgoing,
+        } = await upstreamPort.opened
         const {
-            readable: clientReadable,
-            writable: clientWritable,
-        } = await client.opened
+            readable: downstreamIncoming,
+            writable: downstreamOutgoing,
+        } = await downstreamPort.opened
 
-        serverReadable.pipeTo(clientWritable)
-        clientReadable.pipeTo(serverWritable)
+        upstreamIncoming.pipeTo(downstreamOutgoing)
+        downstreamIncoming.pipeTo(upstreamOutgoing)
 
-        server.closed.then(() => {
+        upstreamPort.closed.then(() => {
             // deno-lint-ignore no-empty
-            try { client.close() } catch { }
+            try { downstreamPort.close() } catch { }
         })
-        client.closed.then(() => {
+        downstreamPort.closed.then(() => {
             // deno-lint-ignore no-empty
-            try { server.close() } catch { }
+            try { upstreamPort.close() } catch { }
         })
     }
 

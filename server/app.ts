@@ -4,7 +4,12 @@ import { RequestContext } from "@ayonli/jsext/http"
 import { serial } from "@ayonli/jsext/number"
 import runtime, { addUnhandledRejectionListener, env } from "@ayonli/jsext/runtime"
 import { stripStart } from "@ayonli/jsext/string"
-import { toWebSocketStream, WebSocketConnection, WebSocketServer, WebSocketStream } from "@ayonli/jsext/ws"
+import {
+    toWebSocketStream,
+    WebSocketConnection,
+    WebSocketServer,
+    WebSocketStream,
+} from "@ayonli/jsext/ws"
 import { Hono } from "hono"
 import { pack, unpack } from "msgpackr"
 import {
@@ -44,24 +49,33 @@ function passAuth(path: string) {
     return authRule ? !authRule.test(path) : false
 }
 
-const wsServer = new WebSocketServer()
-
-const clients: Record<string, WebSocketConnection | null> = {}
 const idPool = serial(true)
 
 function nextId() {
     return idPool.next().value!.toString(32)
 }
 
-const requests = new Map<string, AsyncTask<Response | WebSocketStream>>()
-const responses = new Map<string, WritableStreamDefaultWriter<Uint8Array>>()
+const wsServer = new WebSocketServer()
 
-function processResponseMessage(frame: ProxyResponseHeaderFrame | ProxyResponseBodyFrame) {
+type ClientRecord = {
+    socket: WebSocketConnection
+    requests: Set<string>
+    responses: Set<string>
+}
+const clients: Record<string, ClientRecord | null> = {}
+
+const requestTasks = new Map<string, AsyncTask<Response | WebSocketStream>>()
+const responseWriters = new Map<string, WritableStreamDefaultWriter<Uint8Array>>()
+
+function processResponseMessage(
+    frame: ProxyResponseHeaderFrame | ProxyResponseBodyFrame,
+    clientId: string
+) {
     if (frame.type === "header") {
         const { requestId, status, statusText, headers, eof } = frame
-        const request = requests.get(requestId)
+        const task = requestTasks.get(requestId)
 
-        if (!request) {
+        if (!task) {
             return
         }
 
@@ -71,7 +85,7 @@ function processResponseMessage(frame: ProxyResponseHeaderFrame | ProxyResponseB
                 statusText,
                 headers: new Headers(headers),
             })
-            request.resolve(res)
+            task.resolve(res)
         } else {
             const { readable, writable } = new TransformStream()
             const res = new Response(readable, {
@@ -79,21 +93,29 @@ function processResponseMessage(frame: ProxyResponseHeaderFrame | ProxyResponseB
                 statusText,
                 headers: new Headers(headers),
             })
+
             const writer = writable.getWriter()
-            responses.set(requestId, writer)
-            request.resolve(res)
+            responseWriters.set(requestId, writer)
+
+            const client = clients[clientId]
+            client?.responses.add(requestId)
+
+            task.resolve(res)
         }
     } else if (frame.type === "body") {
         const { requestId, data, eof } = frame
-        const writer = responses.get(requestId)
+        const writer = responseWriters.get(requestId)
 
         if (!writer) {
             return
         }
 
         if (eof) {
-            responses.delete(requestId)
+            responseWriters.delete(requestId)
             writer.close().catch(() => { })
+
+            const client = clients[clientId]
+            client?.responses.delete(requestId)
         } else if (data !== undefined) {
             writer.write(new Uint8Array(data)).catch(console.error)
         }
@@ -130,7 +152,11 @@ const app = new Hono<{ Bindings: any }>()
         const { response, socket } = wsServer.upgrade(ctx.req.raw)
 
         socket.addEventListener("open", () => {
-            clients[clientId] = socket
+            clients[clientId] = {
+                socket,
+                requests: new Set(),
+                responses: new Set(),
+            }
             console.log("Client connected:", clientId)
         })
         socket.addEventListener("message", event => {
@@ -149,11 +175,32 @@ const app = new Hono<{ Bindings: any }>()
                 return
             }
 
-            processResponseMessage(frame)
+            processResponseMessage(frame, clientId)
         })
         socket.addEventListener("close", () => {
-            clients[clientId] = null
             console.log("Client disconnected:", clientId)
+            const { requests, responses } = clients[clientId]!
+
+            // Respond to all pending requests with 500 Internal Server Error.
+            requests.forEach(requestId => {
+                const task = requestTasks.get(requestId)
+                task?.resolve(new Response(null, {
+                    status: 500,
+                    statusText: "Internal Server Error",
+                }))
+            })
+
+            // Close all ongoing responses.
+            responses.forEach(requestId => {
+                const writer = responseWriters.get(requestId)
+                writer?.close().catch(() => { })
+            })
+
+            // Set the client record to null. This will remove the client from
+            // the list of available clients, but keep the client ID untouched,
+            // so that when the client reconnects, it will be assigned to the
+            // same position.
+            clients[clientId] = null
         })
 
         return response
@@ -205,14 +252,14 @@ const app = new Hono<{ Bindings: any }>()
             })
         }
 
-        const request = requests.get(requestId)
-        if (!request) {
+        const task = requestTasks.get(requestId)
+        if (!task) {
             return ctx.text("Request not found.", { status: 404 })
         }
 
         const { response, socket } = wsServer.upgrade(ctx.req.raw)
-        const server = toWebSocketStream(socket)
-        request.resolve(server)
+        const stream = toWebSocketStream(socket)
+        task.resolve(stream)
 
         return response
     })
@@ -233,7 +280,7 @@ const app = new Hono<{ Bindings: any }>()
             })
         }
 
-        const _clients = Object.values(clients).filter(Boolean) as WebSocketConnection[]
+        const _clients = Object.values(clients).filter(Boolean) as ClientRecord[]
 
         if (!_clients.length) {
             return new Response(respondBody ? "No proxy client" : null, {
@@ -253,7 +300,7 @@ const app = new Hono<{ Bindings: any }>()
             ip ||= ""
         }
         const modId = crc32(ip) % _clients.length
-        const socket = _clients[modId]
+        const client = _clients[modId]
         const requestId = nextId()
         const req = ctx.req.raw
         const { protocol, host, pathname, search } = new URL(req.url)
@@ -287,8 +334,9 @@ const app = new Hono<{ Bindings: any }>()
         const buf = pack(header)
         const task = asyncTask<Response | WebSocketStream>()
 
-        requests.set(requestId, task)
-        socket.send(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
+        requestTasks.set(requestId, task)
+        client.requests.add(requestId)
+        client.socket.send(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
 
         if (req.body) {
             // Transfer the request body asynchronously, so that the response
@@ -304,7 +352,7 @@ const app = new Hono<{ Bindings: any }>()
                         eof: done,
                     }
 
-                    socket.send(pack(body))
+                    client.socket.send(pack(body))
 
                     if (done) {
                         break
@@ -314,37 +362,38 @@ const app = new Hono<{ Bindings: any }>()
         }
 
         const res = await Promise.any([task, sleep(30_000)])
-        requests.delete(requestId)
+        requestTasks.delete(requestId)
+        client.requests.delete(requestId)
 
         if (res instanceof Response) {
             return res
         }
 
         if (res instanceof WebSocketStream) {
-            const server = res
+            const upstreamPort = res
             const { response, socket } = wsServer.upgrade(ctx.req.raw)
-            const client = toWebSocketStream(socket);
+            const downstreamPort = toWebSocketStream(socket);
 
             (async () => {
                 const {
-                    readable: serverReadable,
-                    writable: serverWritable,
-                } = await server.opened
+                    readable: upstreamIncoming,
+                    writable: upstreamOutgoing,
+                } = await upstreamPort.opened
                 const {
-                    readable: clientReadable,
-                    writable: clientWritable,
-                } = await client.opened
+                    readable: downstreamIncoming,
+                    writable: downstreamOutgoing,
+                } = await downstreamPort.opened
 
-                serverReadable.pipeTo(clientWritable)
-                clientReadable.pipeTo(serverWritable)
+                upstreamIncoming.pipeTo(downstreamOutgoing)
+                downstreamIncoming.pipeTo(upstreamOutgoing)
 
-                server.closed.then(() => {
+                upstreamPort.closed.then(() => {
                     // deno-lint-ignore no-empty
-                    try { client.close() } catch { }
+                    try { downstreamPort.close() } catch { }
                 })
-                client.closed.then(() => {
+                downstreamPort.closed.then(() => {
                     // deno-lint-ignore no-empty
-                    try { server.close() } catch { }
+                    try { upstreamPort.close() } catch { }
                 })
             })()
 
