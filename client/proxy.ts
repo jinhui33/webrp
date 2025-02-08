@@ -24,11 +24,21 @@ export function getConfig() {
     return { clientId, remoteUrl, localUrl, connToken, pingInterval }
 }
 
+export interface ProxyClientOptions {
+    clientId: string
+    remoteUrl: string
+    localUrl: string
+    connToken?: string
+    pingInterval?: number
+    logPrefix?: string
+}
+
 export default class ProxyClient {
     private clientId: string
     private remoteUrl: string
     private localUrl: string
     readonly connToken: string | undefined
+    private logPrefix: string | undefined
     private socket: WebSocket | null = null
     private connectedBefore = false
     private lastActive = 0
@@ -37,13 +47,14 @@ export default class ProxyClient {
     private healthChecker: number | NodeJS.Timeout
     private requests = new Map<string, WritableStreamDefaultWriter>()
 
-    constructor() {
-        const { clientId, remoteUrl, localUrl, connToken, pingInterval } = getConfig()
+    constructor(options: ProxyClientOptions) {
+        const { clientId, remoteUrl, localUrl, connToken, pingInterval, logPrefix } = options
         this.clientId = clientId
         this.remoteUrl = remoteUrl
         this.localUrl = localUrl
         this.connToken = connToken
-        this.pingInterval = pingInterval
+        this.logPrefix = logPrefix
+        this.pingInterval = pingInterval ?? 30_000
         this.healthChecker = setInterval(() => {
             if (this.socket &&
                 !this.pingTask &&
@@ -55,6 +66,14 @@ export default class ProxyClient {
         }, 1_000)
 
         unrefTimer(this.healthChecker)
+    }
+
+    private log(msg: string, ...args: unknown[]) {
+        console.log(this.logPrefix + msg, ...args)
+    }
+
+    private logError(msg: string, ...args: unknown[]) {
+        console.error(this.logPrefix + msg, ...args)
     }
 
     private async ping(): Promise<void> {
@@ -79,7 +98,9 @@ export default class ProxyClient {
         const url = new URL("__ping__", this.remoteUrl)
         url.searchParams.set("clientId", this.clientId)
 
-        const result = await Result.try(fetch(url))
+        const result = await Result.try(fetch(url, {
+            signal: AbortSignal.timeout(5_000),
+        }))
         if (!result.ok) {
             // The server is not responding to the ping, close the connection
             // for reconnection.
@@ -117,21 +138,21 @@ export default class ProxyClient {
 
         socket.binaryType = "arraybuffer"
         socket.addEventListener("open", () => {
-            console.log("Connected to the server")
+            this.log("Connected to the server")
             this.connectedBefore = true
             this.lastActive = Date.now()
         })
 
         socket.addEventListener("error", (ev) => {
             if ((ev as ErrorEvent).message?.includes("401")) {
-                console.error("Failed to connect to the server, unauthorized")
+                this.logError("Failed to connect to the server, unauthorized")
                 socket.close()
             } else if (socket.readyState === WebSocket.CONNECTING ||
                 (socket.readyState === WebSocket.CLOSED && !this.connectedBefore)
             ) {
-                console.log("Failed to connect to the server, will retry in 5 seconds")
+                this.log("Failed to connect to the server, will retry in 5 seconds")
                 setTimeout(() => {
-                    console.log("Reconnecting...")
+                    this.log("Reconnecting...")
                     this.connectedBefore = false
                     this.connect()
                 }, 5_000)
@@ -140,9 +161,9 @@ export default class ProxyClient {
 
         socket.addEventListener("close", () => {
             if (this.connectedBefore) {
-                console.log("Disconnected from the server")
+                this.log("Disconnected from the server")
                 setTimeout(() => {
-                    console.log("Reconnecting...")
+                    this.log("Reconnecting...")
                     this.connectedBefore = false
                     this.connect()
                 }, 0)
@@ -158,7 +179,7 @@ export default class ProxyClient {
                 // activity.
                 (event.data === null && this.pingTask)
             ) {
-                console.log("Pong from the server")
+                this.log("Pong from the server")
                 this.pingTask?.resolve()
                 return
             } else if (typeof event.data === "string") {

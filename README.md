@@ -30,7 +30,13 @@ The program uses environment variables for configuration, we can set them in a
 CLIENT_ID=mac@home # A unique identifier of the proxy client.
 REMOTE_URL=http://localhost:8000 # The base URL of the proxy server.
 LOCAL_URL=http://localhost:11434 # The base URL of the local HTTP server.
-PING_INTERVAL=30 # Optional, ping interval in seconds, shall not be less than 5.
+
+# Optional, ping interval in seconds, shall not be less than 5, default 30.
+PING_INTERVAL=30
+
+# Optional, how many open connections between the client and the server, default
+# 1, more connection can improve throughput and service availability.
+MAX_CONN=1
 ```
 
 ### Authentication
