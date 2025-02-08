@@ -1,6 +1,6 @@
 import { asyncTask, AsyncTask, sleep } from "@ayonli/jsext/async"
 import { Result } from "@ayonli/jsext/result"
-import { env, unrefTimer } from "@ayonli/jsext/runtime"
+import { unrefTimer } from "@ayonli/jsext/runtime"
 import { toWebSocketStream, WebSocket } from "@ayonli/jsext/ws"
 import { pack, unpack } from "msgpackr"
 import {
@@ -9,20 +9,6 @@ import {
     ProxyResponseBodyFrame,
     ProxyResponseHeaderFrame,
 } from "../header.ts"
-
-export function getConfig() {
-    const clientId = env("CLIENT_ID")
-    const remoteUrl = env("REMOTE_URL")
-    const localUrl = env("LOCAL_URL")
-    const connToken = env("CONN_TOKEN")
-    const pingInterval = Math.max(Number(env("PING_INTERVAL") || "30"), 5) * 1_000
-
-    if (!clientId || !remoteUrl || !localUrl) {
-        throw new Error("CLIENT_ID, REMOTE_URL and LOCAL_URL must be set")
-    }
-
-    return { clientId, remoteUrl, localUrl, connToken, pingInterval }
-}
 
 export interface ProxyClientOptions {
     clientId: string
