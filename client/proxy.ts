@@ -38,7 +38,7 @@ export default class ProxyClient {
     private remoteUrl: string
     private localUrl: string
     readonly connToken: string | undefined
-    private logPrefix: string | undefined
+    private logPrefix: string
     private socket: WebSocket | null = null
     private connectedBefore = false
     private lastActive = 0
@@ -53,7 +53,7 @@ export default class ProxyClient {
         this.remoteUrl = remoteUrl
         this.localUrl = localUrl
         this.connToken = connToken
-        this.logPrefix = logPrefix
+        this.logPrefix = logPrefix ?? ""
         this.pingInterval = pingInterval ?? 30_000
         this.healthChecker = setInterval(() => {
             if (this.socket &&
