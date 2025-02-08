@@ -13,6 +13,7 @@ import {
 import { Hono } from "hono"
 import { pack, unpack } from "msgpackr"
 import {
+    ProxyRequestAbortFrame,
     ProxyRequestBodyFrame,
     ProxyRequestHeaderFrame,
     ProxyResponseBodyFrame,
@@ -344,22 +345,33 @@ const app = new Hono<{ Bindings: any }>()
             (async () => {
                 const reader = req.body!.getReader()
                 while (true) {
-                    const { done, value } = await reader.read()
-                    const body: ProxyRequestBodyFrame = {
-                        requestId,
-                        type: "body",
-                        data: value?.buffer,
-                        eof: done,
-                    }
+                    try {
+                        const { done, value } = await reader.read()
+                        const body: ProxyRequestBodyFrame = {
+                            requestId,
+                            type: "body",
+                            data: value?.buffer,
+                            eof: done,
+                        }
 
-                    client.socket.send(pack(body))
+                        client.socket.send(pack(body))
 
-                    if (done) {
+                        if (done) {
+                            break
+                        }
+                    } catch { // request aborted or stream error
                         break
                     }
                 }
             })().catch(console.error)
         }
+
+        req.signal.addEventListener("abort", () => {
+            client.socket.send(pack({
+                requestId,
+                type: "abort",
+            } satisfies ProxyRequestAbortFrame))
+        })
 
         const res = await Promise.any([task, sleep(30_000)])
         requestTasks.delete(requestId)

@@ -15,6 +15,11 @@ export interface ProxyRequestBodyFrame extends ProxyFrame {
     data?: ArrayBuffer
 }
 
+export interface ProxyRequestAbortFrame {
+    requestId: string
+    type: "abort"
+}
+
 export interface ProxyResponseHeaderFrame extends ProxyFrame {
     type: "header"
     status: number

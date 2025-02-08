@@ -4,6 +4,7 @@ import { unrefTimer } from "@ayonli/jsext/runtime"
 import { toWebSocketStream, WebSocket } from "@ayonli/jsext/ws"
 import { pack, unpack } from "msgpackr"
 import {
+    ProxyRequestAbortFrame,
     ProxyRequestBodyFrame,
     ProxyRequestHeaderFrame,
     ProxyResponseBodyFrame,
@@ -29,6 +30,7 @@ export default class ProxyClient {
     private connectedBefore = false
     private lastActive = 0
     private requestWriters = new Map<string, WritableStreamDefaultWriter>()
+    private requestControllers = new Map<string, AbortController>()
     private pingTask: AsyncTask<void> | null = null
     private pingInterval: number
     private healthChecker: number | NodeJS.Timeout
@@ -184,7 +186,9 @@ export default class ProxyClient {
         })
     }
 
-    private async processRequestMessage(frame: ProxyRequestHeaderFrame | ProxyRequestBodyFrame) {
+    private async processRequestMessage(
+        frame: ProxyRequestHeaderFrame | ProxyRequestBodyFrame | ProxyRequestAbortFrame
+    ) {
         if (frame.type === "header") {
             const { requestId, method, path, headers: _headers, eof } = frame
             const url = new URL(path, this.localUrl)
@@ -203,12 +207,19 @@ export default class ProxyClient {
                 return this.processWebSocketRequest(requestId, url, headers)
             }
 
+            const controller = new AbortController()
             const reqInit: RequestInit = {
                 method,
                 headers,
+                signal: controller.signal,
                 // @ts-ignore for Node.js
                 duplex: "half",
             }
+
+            this.requestControllers.set(requestId, controller)
+            controller.signal.addEventListener("abort", () => {
+                this.requestControllers.delete(requestId)
+            })
 
             if (!eof) {
                 const { readable, writable } = new TransformStream()
@@ -221,6 +232,7 @@ export default class ProxyClient {
             const result = await Result.try(fetch(req))
 
             if (!result.ok) {
+                this.requestControllers.delete(requestId)
                 return this.respond({
                     requestId,
                     type: "header",
@@ -273,6 +285,8 @@ export default class ProxyClient {
                     }
                 }
             }
+
+            this.requestControllers.delete(requestId)
         } else if (frame.type === "body") {
             const { requestId, data, eof } = frame
             const writer = this.requestWriters.get(requestId)
@@ -286,6 +300,11 @@ export default class ProxyClient {
                 writer.close().catch(console.error)
             } else if (data !== undefined) {
                 writer.write(new Uint8Array(data)).catch(console.error)
+            }
+        } else if (frame.type === "abort") {
+            const controller = this.requestControllers.get(frame.requestId)
+            if (controller) {
+                controller.abort()
             }
         }
     }
