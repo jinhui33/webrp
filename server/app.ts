@@ -332,12 +332,11 @@ const app = new Hono<{ Bindings: any }>()
             headers: [...headers.entries()],
             eof: !req.body,
         } satisfies ProxyRequestHeaderFrame
-        const buf = pack(header)
         const task = asyncTask<Response | WebSocketStream>()
 
         requestTasks.set(requestId, task)
         client.requests.add(requestId)
-        client.socket.send(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
+        client.socket.send(pack(header))
 
         if (req.body) {
             // Transfer the request body asynchronously, so that the response
@@ -350,7 +349,7 @@ const app = new Hono<{ Bindings: any }>()
                         const body: ProxyRequestBodyFrame = {
                             requestId,
                             type: "body",
-                            data: value?.buffer,
+                            data: value,
                             eof: done,
                         }
 

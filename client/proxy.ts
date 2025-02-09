@@ -299,7 +299,9 @@ export default class ProxyClient {
                 this.requestWriters.delete(requestId)
                 writer.close().catch(console.error)
             } else if (data !== undefined) {
-                writer.write(new Uint8Array(data)).catch(console.error)
+                writer.write(data).then(() => {
+                    this.lastActive = Date.now()
+                }).catch(console.error)
             }
         } else if (frame.type === "abort") {
             const controller = this.requestControllers.get(frame.requestId)
@@ -349,7 +351,7 @@ export default class ProxyClient {
             return
         }
 
-        const buf = pack(frame)
-        this.socket.send(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength))
+        this.socket.send(pack(frame))
+        this.lastActive = Date.now()
     }
 }

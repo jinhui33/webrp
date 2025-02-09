@@ -12,7 +12,7 @@ export interface ProxyRequestHeaderFrame extends ProxyFrame {
 
 export interface ProxyRequestBodyFrame extends ProxyFrame {
     type: "body"
-    data?: ArrayBuffer
+    data?: Uint8Array
 }
 
 export interface ProxyRequestAbortFrame {
@@ -29,5 +29,5 @@ export interface ProxyResponseHeaderFrame extends ProxyFrame {
 
 export interface ProxyResponseBodyFrame extends ProxyFrame {
     type: "body"
-    data?: ArrayBuffer
+    data?: Uint8Array
 }
