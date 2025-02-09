@@ -15,6 +15,15 @@ export interface ProxyRequestBodyFrame extends ProxyFrame {
     data?: Uint8Array
 }
 
+export interface ProxyRequestFrame {
+    requestId: string
+    type: "request"
+    method: string
+    path: string
+    headers: [string, string][]
+    body?: Uint8Array
+}
+
 export interface ProxyRequestAbortFrame {
     requestId: string
     type: "abort"

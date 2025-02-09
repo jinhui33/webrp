@@ -74,6 +74,17 @@ We can, however, turn `on` the `FORWARD_HOST` setting on the server side to
 instruct the proxy program not to set the `X-Forwarded-Host` header and use
 `Host` to store the proxy server's address instead.
 
+### Buffer Request
+
+By default, the proxy server and the proxy client use a streaming mechanism for
+transferring request for maximum efficiency and full duplex HTTP protocol.
+However, this mechanism isn't supported by **Bun** yet, see
+https://github.com/oven-sh/bun/issues/7135.
+
+If we want to run the proxy program (the client specifically), we need to buffer
+the request and disable the streaming feature by turning `on` of the
+`BUFFER_REQUEST` setting on the server.
+
 ## Deploy the Server
 
 ### Deno Deploy
@@ -125,7 +136,7 @@ npm install
 npm run client
 # or
 bun install
-bun run client/main.ts
+bun run client/main.ts # Need to turn on BUFFER_REQUEST on the server.
 ```
 
 ## Common Errors

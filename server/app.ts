@@ -15,6 +15,7 @@ import { pack, unpack } from "msgpackr"
 import {
     ProxyRequestAbortFrame,
     ProxyRequestBodyFrame,
+    ProxyRequestFrame,
     ProxyRequestHeaderFrame,
     ProxyResponseBodyFrame,
     ProxyResponseHeaderFrame,
@@ -324,45 +325,64 @@ const app = new Hono<{ Bindings: any }>()
             headers.set("host", host)
         }
 
-        const header = {
-            requestId,
-            type: "header",
-            method: req.method,
-            path: pathname + search,
-            headers: [...headers.entries()],
-            eof: !req.body,
-        } satisfies ProxyRequestHeaderFrame
         const task = asyncTask<Response | WebSocketStream>()
 
         requestTasks.set(requestId, task)
         client.requests.add(requestId)
-        client.socket.send(pack(header))
 
-        if (req.body) {
-            // Transfer the request body asynchronously, so that the response
-            // can be processed in parallel.
-            (async () => {
-                const reader = req.body!.getReader()
-                while (true) {
-                    try {
-                        const { done, value } = await reader.read()
-                        const body: ProxyRequestBodyFrame = {
-                            requestId,
-                            type: "body",
-                            data: value,
-                            eof: done,
-                        }
+        const { BUFFER_REQUEST } = env()
+        if (BUFFER_REQUEST?.toLowerCase().match(/^(true|on|1)$/)) {
+            // Read all the request body before sending the request to the proxy
+            // client.
+            // This is not recommended as it can cause high memory usage and
+            // will prevent the HTTP transaction from supporting full duplex
+            // communication.
+            const request: ProxyRequestFrame = {
+                requestId,
+                type: "request",
+                method: req.method,
+                path: pathname + search,
+                headers: [...headers.entries()],
+                body: req.body ? new Uint8Array(await req.arrayBuffer()) : undefined,
+            }
+            client.socket.send(pack(request))
+        } else {
+            const header: ProxyRequestHeaderFrame = {
+                requestId,
+                type: "header",
+                method: req.method,
+                path: pathname + search,
+                headers: [...headers.entries()],
+                eof: !req.body,
+            }
+            client.socket.send(pack(header))
 
-                        client.socket.send(pack(body))
+            if (req.body) {
+                // Transfer the request body asynchronously, so that the response
+                // can be processed in parallel.
+                (async () => {
+                    const reader = req.body!.getReader()
+                    while (true) {
+                        try {
+                            const { done, value } = await reader.read()
+                            const body: ProxyRequestBodyFrame = {
+                                requestId,
+                                type: "body",
+                                data: value,
+                                eof: done,
+                            }
 
-                        if (done) {
+                            client.socket.send(pack(body))
+
+                            if (done) {
+                                break
+                            }
+                        } catch { // request aborted or stream error
                             break
                         }
-                    } catch { // request aborted or stream error
-                        break
                     }
-                }
-            })().catch(console.error)
+                })().catch(console.error)
+            }
         }
 
         req.signal.addEventListener("abort", () => {

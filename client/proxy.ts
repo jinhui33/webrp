@@ -6,6 +6,7 @@ import { pack, unpack } from "msgpackr"
 import {
     ProxyRequestAbortFrame,
     ProxyRequestBodyFrame,
+    ProxyRequestFrame,
     ProxyRequestHeaderFrame,
     ProxyResponseBodyFrame,
     ProxyResponseHeaderFrame,
@@ -187,10 +188,10 @@ export default class ProxyClient {
     }
 
     private async processRequestMessage(
-        frame: ProxyRequestHeaderFrame | ProxyRequestBodyFrame | ProxyRequestAbortFrame
+        frame: ProxyRequestFrame | ProxyRequestHeaderFrame | ProxyRequestBodyFrame | ProxyRequestAbortFrame
     ) {
-        if (frame.type === "header") {
-            const { requestId, method, path, headers: _headers, eof } = frame
+        if (frame.type === "request" || frame.type === "header") {
+            const { requestId, method, path, headers: _headers } = frame
             const url = new URL(path, this.localUrl)
             const headers = new Headers(_headers)
 
@@ -208,6 +209,11 @@ export default class ProxyClient {
             }
 
             const controller = new AbortController()
+            this.requestControllers.set(requestId, controller)
+            controller.signal.addEventListener("abort", () => {
+                this.requestControllers.delete(requestId)
+            })
+
             const reqInit: RequestInit = {
                 method,
                 headers,
@@ -216,12 +222,9 @@ export default class ProxyClient {
                 duplex: "half",
             }
 
-            this.requestControllers.set(requestId, controller)
-            controller.signal.addEventListener("abort", () => {
-                this.requestControllers.delete(requestId)
-            })
-
-            if (!eof) {
+            if (frame.type === "request" && frame.body) {
+                reqInit.body = frame.body
+            } else if (frame.type === "header" && !frame.eof) {
                 const { readable, writable } = new TransformStream()
                 const writer = writable.getWriter()
                 this.requestWriters.set(requestId, writer)
