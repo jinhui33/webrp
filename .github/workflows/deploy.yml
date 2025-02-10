@@ -34,7 +34,7 @@ jobs:
       - name: Upload to Deno Deploy
         uses: denoland/deployctl@v1
         with:
-          project: "jinhui33-webrp-18"
+          project: "lxs33"
           entrypoint: "server/main.ts"
           root: ""
           
