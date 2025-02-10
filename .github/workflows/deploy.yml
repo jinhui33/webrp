@@ -31,16 +31,11 @@ jobs:
       - name: Install step
         run: "deno install"
 
-      - name: Deno Deploy (ayonli-webrp)
+      - name: Upload to Deno Deploy
         uses: denoland/deployctl@v1
         with:
-          project: "ayonli-webrp"
+          project: "jinhui33-webrp-18"
           entrypoint: "server/main.ts"
           root: ""
-
-      - name: Deno Deploy (ayonli-ollama)
-        uses: denoland/deployctl@v1
-        with:
-          project: "ayonli-ollama"
-          entrypoint: "server/main.ts"
-          root: ""
+          
+          
